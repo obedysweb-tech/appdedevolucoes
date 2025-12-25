@@ -1,19 +1,31 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useFilterStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { CalendarIcon, FilterX, Search } from "lucide-react";
+import { CalendarIcon, FilterX, Search, Layers } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { supabase } from "@/lib/supabase";
+import { Sector } from "@/types";
 
 export function FilterBar() {
   const { filters, setFilters, resetFilters } = useFilterStore();
   const [date, setDate] = useState<Date | undefined>(filters.startDate);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+
+  useEffect(() => {
+      // Fetch Sectors for filter dropdown
+      const fetchSectors = async () => {
+          const { data } = await supabase.from('sectors').select('*').order('name');
+          if (data) setSectors(data);
+      };
+      fetchSectors();
+  }, []);
 
   return (
     <div className="w-full bg-card border-b p-4 space-y-4">
@@ -33,12 +45,29 @@ export function FilterBar() {
         {/* Filters Group */}
         <div className="flex flex-wrap gap-2 items-center w-full md:w-auto">
             
+            {/* Sector Filter */}
+            <Select 
+                value={filters.sector?.[0] || 'all'} 
+                onValueChange={(val) => setFilters({ sector: val === 'all' ? undefined : [val] })}
+            >
+                <SelectTrigger className="w-[160px]">
+                    <Layers className="mr-2 h-4 w-4 text-muted-foreground" />
+                    <SelectValue placeholder="Setor" />
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="all">Todos os Setores</SelectItem>
+                    {sectors.map(s => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+
             {/* Period Select */}
             <Select 
                 value={filters.period} 
                 onValueChange={(val: any) => setFilters({ period: val })}
             >
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-[160px]">
                     <SelectValue placeholder="Período" />
                 </SelectTrigger>
                 <SelectContent>
@@ -55,9 +84,9 @@ export function FilterBar() {
             {/* Date Range Picker (Simplified as Single Date for UI demo) */}
             <Popover>
                 <PopoverTrigger asChild>
-                    <Button variant="outline" className={cn("w-[240px] justify-start text-left font-normal", !date && "text-muted-foreground")}>
+                    <Button variant="outline" className={cn("w-[200px] justify-start text-left font-normal", !date && "text-muted-foreground")}>
                         <CalendarIcon className="mr-2 h-4 w-4" />
-                        {date ? format(date, "PPP", { locale: ptBR }) : <span>Selecione uma data</span>}
+                        {date ? format(date, "dd/MM/yyyy") : <span>Data Específica</span>}
                     </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
@@ -77,10 +106,11 @@ export function FilterBar() {
         </div>
       </div>
 
-      {/* Active Filters Badges (Demo) */}
-      <div className="flex gap-2">
+      {/* Active Filters Badges */}
+      <div className="flex gap-2 flex-wrap">
         {filters.period && <Badge variant="secondary">Período: {filters.period}</Badge>}
         {filters.search && <Badge variant="secondary">Busca: {filters.search}</Badge>}
+        {filters.sector && filters.sector.length > 0 && <Badge variant="secondary">Setor: {sectors.find(s => s.id === filters.sector?.[0])?.name || 'Selecionado'}</Badge>}
       </div>
     </div>
   );

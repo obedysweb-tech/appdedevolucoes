@@ -1,26 +1,26 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { UploadCloud, FileSpreadsheet, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
+import { UploadCloud, Loader2, CheckCircle, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import * as XLSX from 'xlsx';
 import { supabase } from "@/lib/supabase";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ReturnReason } from "@/types";
 
-// Mapping configuration based on user requirements
+// Mapping configuration
 const COLUMN_MAPPING: Record<string, { dbField: string, visible: boolean, type: 'string' | 'number' | 'date' }> = {
     'CNPJ Destinatário': { dbField: 'customer_cnpj', visible: false, type: 'string' },
     'Destinatário': { dbField: 'customer_name', visible: false, type: 'string' },
-    'Nome Filial': { dbField: 'network', visible: true, type: 'string' }, // Derived/Mapped
-    'Nome Cliente': { dbField: 'customer_name_display', visible: true, type: 'string' }, // Derived/Mapped
+    'Nome Filial': { dbField: 'network', visible: true, type: 'string' },
+    'Nome Cliente': { dbField: 'customer_name_display', visible: true, type: 'string' },
     'Cidade Origem': { dbField: 'origin_city', visible: true, type: 'string' },
     'UF Origem': { dbField: 'origin_uf', visible: true, type: 'string' },
     'Chave de Acesso': { dbField: 'access_key', visible: false, type: 'string' },
     'Data Emissão': { dbField: 'invoice_date', visible: true, type: 'date' },
     'Número': { dbField: 'invoice_number', visible: true, type: 'string' },
-    'Série': { dbField: 'invoice_series', visible: false, type: 'string' },
     'Valor Total da Nota': { dbField: 'total_value', visible: true, type: 'number' },
     'Vendedor': { dbField: 'seller_name', visible: true, type: 'string' },
     'Motivo': { dbField: 'reason_name', visible: true, type: 'string' },
@@ -37,7 +37,16 @@ export function SyncPage() {
   const [file, setFile] = useState<File | null>(null);
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [reasonsMap, setReasonsMap] = useState<ReturnReason[]>([]);
+
+  // 1. Carregar Motivos e Setores do Banco para fazer o "De-Para"
+  useEffect(() => {
+      const fetchMasterData = async () => {
+          const { data } = await supabase.from('return_reasons').select('*, sector:sectors(*)');
+          if (data) setReasonsMap(data);
+      };
+      fetchMasterData();
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -52,13 +61,11 @@ export function SyncPage() {
     reader.onload = (e) => {
       const data = e.target?.result;
       if (data) {
-        // cellDates: true ensures dates are parsed correctly as JS Date objects
         const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         const jsonData = XLSX.utils.sheet_to_json(sheet);
         
-        // Format dates for preview
         const formattedPreview = jsonData.slice(0, 10).map((row: any) => {
             const newRow = { ...row };
             if (newRow['Data Emissão'] instanceof Date) {
@@ -73,6 +80,21 @@ export function SyncPage() {
     reader.readAsBinaryString(file);
   };
 
+  const findReasonAndSector = (reasonName: string) => {
+      if (!reasonName) return { reason_id: null, sector_id: null };
+      
+      // Busca insensível a maiúsculas/minúsculas e acentos
+      const normalize = (str: string) => str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      const target = normalize(reasonName);
+
+      const match = reasonsMap.find(r => normalize(r.name) === target);
+      
+      if (match) {
+          return { reason_id: match.id, sector_id: match.sector_id };
+      }
+      return { reason_id: null, sector_id: null };
+  };
+
   const processAndUpload = async () => {
     if (!file) return;
     setIsProcessing(true);
@@ -81,12 +103,10 @@ export function SyncPage() {
         const reader = new FileReader();
         reader.onload = async (e) => {
             const data = e.target?.result;
-            // Important: cellDates: true to handle Excel serial dates
             const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(sheet);
 
-            // Group by Invoice Number (assuming one return per invoice for simplicity, or handle items)
             const returnsMap = new Map<string, any>();
 
             for (const row of jsonData as any[]) {
@@ -94,21 +114,20 @@ export function SyncPage() {
                 if (!invoiceNumber) continue;
 
                 if (!returnsMap.has(invoiceNumber)) {
-                    // Handle Date Parsing safely
                     let invoiceDate = new Date().toISOString();
                     if (row['Data Emissão']) {
                         if (row['Data Emissão'] instanceof Date) {
                             invoiceDate = row['Data Emissão'].toISOString();
                         } else {
-                            // Try parsing string
                             const parsed = new Date(row['Data Emissão']);
-                            if (!isNaN(parsed.getTime())) {
-                                invoiceDate = parsed.toISOString();
-                            }
+                            if (!isNaN(parsed.getTime())) invoiceDate = parsed.toISOString();
                         }
                     }
 
-                    // Create Header
+                    // Lógica de Lookup Inteligente
+                    const reasonText = row['Motivo'] || '';
+                    const { reason_id, sector_id } = findReasonAndSector(reasonText);
+
                     returnsMap.set(invoiceNumber, {
                         invoice_number: String(invoiceNumber),
                         customer_name: row['Destinatário'] || row['Nome Cliente'] || 'Desconhecido',
@@ -116,16 +135,17 @@ export function SyncPage() {
                         origin_city: row['Cidade Origem'],
                         origin_uf: row['UF Origem'],
                         invoice_date: invoiceDate,
-                        total_value: 0, // Will sum up items
+                        total_value: 0,
                         seller_name: row['Vendedor'],
+                        network: row['Nome Filial'],
                         status: 'PENDING',
+                        reason_id: reason_id, // ID Real
+                        sector_id: sector_id, // ID Real
                         items: []
                     });
                 }
 
                 const returnEntry = returnsMap.get(invoiceNumber);
-                
-                // Add Item
                 const itemTotal = parseFloat(row['[Item] Valor Total Bruto'] || '0');
                 returnEntry.total_value += itemTotal;
                 
@@ -139,11 +159,11 @@ export function SyncPage() {
                 });
             }
 
-            // Batch Insert into Supabase
             let successCount = 0;
+            const returnsArray = Array.from(returnsMap.values());
 
-            for (const returnData of returnsMap.values()) {
-                // 1. Insert Return Header
+            // Processamento em lote (um por um para garantir integridade)
+            for (const returnData of returnsArray) {
                 const { data: insertedReturn, error: returnError } = await supabase
                     .from('returns')
                     .insert({
@@ -155,18 +175,20 @@ export function SyncPage() {
                         invoice_date: returnData.invoice_date,
                         total_value: returnData.total_value,
                         seller_name: returnData.seller_name,
-                        status: 'PENDING'
+                        network: returnData.network,
+                        status: 'PENDING',
+                        reason_id: returnData.reason_id, // Importante para gráficos
+                        sector_id: returnData.sector_id  // Importante para gráficos
                     })
                     .select()
                     .single();
 
                 if (returnError) {
-                    console.error('Error inserting return:', returnError);
+                    console.error('Erro ao inserir devolução:', returnError);
                     continue;
                 }
 
                 if (insertedReturn) {
-                    // 2. Insert Items
                     const itemsToInsert = returnData.items.map((item: any) => ({
                         return_id: insertedReturn.id,
                         description: item.description,
@@ -187,9 +209,8 @@ export function SyncPage() {
 
             if (successCount > 0) {
                 toast.success(`${successCount} devoluções importadas com sucesso!`);
-                setUploadStatus('success');
             } else {
-                toast.warning("Nenhuma devolução foi importada. Verifique o formato do arquivo.");
+                toast.warning("Nenhuma devolução importada. Verifique o arquivo.");
             }
             
             setIsProcessing(false);
@@ -200,13 +221,11 @@ export function SyncPage() {
 
     } catch (error) {
         console.error(error);
-        toast.error("Erro ao processar arquivo");
-        setUploadStatus('error');
+        toast.error("Erro crítico ao processar arquivo");
         setIsProcessing(false);
     }
   };
 
-  // Filter columns for preview based on "visible" flag
   const visibleColumns = Object.keys(COLUMN_MAPPING).filter(key => COLUMN_MAPPING[key].visible);
 
   return (
@@ -217,7 +236,7 @@ export function SyncPage() {
         <Card>
             <CardHeader>
                 <CardTitle>Importar Arquivo</CardTitle>
-                <CardDescription>Faça upload de arquivos CSV ou XLSX para processar novas devoluções.</CardDescription>
+                <CardDescription>Faça upload de arquivos CSV ou XLSX. O sistema identificará automaticamente os Motivos e Setores.</CardDescription>
             </CardHeader>
             <CardContent>
                 <div className="flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-10 hover:bg-muted/50 transition-colors relative">
@@ -237,7 +256,7 @@ export function SyncPage() {
                 {previewData.length > 0 && (
                     <div className="mt-6 space-y-4">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-semibold">Pré-visualização (Colunas Visíveis)</h3>
+                            <h3 className="text-sm font-semibold">Pré-visualização</h3>
                             <Button onClick={processAndUpload} disabled={isProcessing}>
                                 {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                 Confirmar e Processar
@@ -265,20 +284,12 @@ export function SyncPage() {
                                 </TableBody>
                             </Table>
                         </ScrollArea>
+                        <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">
+                            <AlertTriangle className="h-4 w-4" />
+                            <span>Certifique-se de que os nomes dos "Motivos" no Excel correspondam exatamente aos cadastrados em Configurações para que os gráficos funcionem.</span>
+                        </div>
                     </div>
                 )}
-            </CardContent>
-        </Card>
-
-        <Card>
-            <CardHeader>
-                <CardTitle>Histórico de Importações</CardTitle>
-                <CardDescription>Últimos arquivos processados pelo sistema.</CardDescription>
-            </CardHeader>
-            <CardContent>
-                 <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                    <p>O histórico de importações será exibido aqui.</p>
-                 </div>
             </CardContent>
         </Card>
       </div>

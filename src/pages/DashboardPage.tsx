@@ -33,7 +33,6 @@ import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 
 // Cores Doce Mel (Verde e tons derivados) + Ciano para Dark Mode
-// A lógica de cor será aplicada via CSS Variables se possível, ou hex direto
 const COLORS_LIGHT = ['#18442b', '#2e6b4d', '#4a9170', '#70b896', '#9cdebd', '#c4f0da'];
 const COLORS_DARK = ['#3fedef', '#2cb5b8', '#1e8285', '#135457', '#0a2e30', '#000000'];
 
@@ -53,15 +52,12 @@ export function DashboardPage() {
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
-    // Detect theme for chart colors
     const checkTheme = () => {
         setIsDark(document.documentElement.classList.contains('dark'));
     };
     checkTheme();
-    // Observer for class changes on html
     const observer = new MutationObserver(checkTheme);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    
     return () => observer.disconnect();
   }, []);
 
@@ -77,7 +73,8 @@ export function DashboardPage() {
     // Base query
     let query = supabase.from('returns').select(`
         *,
-        return_reasons(name)
+        return_reasons(name),
+        sectors(id, name)
     `);
     
     // Apply Filters
@@ -89,6 +86,12 @@ export function DashboardPage() {
     }
     if (filters.endDate) {
         query = query.lte('invoice_date', filters.endDate.toISOString());
+    }
+    if (filters.sector && filters.sector.length > 0) {
+        // Filter by sector_id if available in returns table
+        // Note: You need to ensure 'sector_id' exists in 'returns' table or join filtering
+        // Assuming we added sector_id to returns in migration
+        query = query.in('sector_id', filters.sector);
     }
     
     const { data: returns, error } = await query;

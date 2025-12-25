@@ -9,7 +9,6 @@ import {
   Settings, 
   User, 
   LogOut,
-  Package,
   Moon,
   Sun
 } from "lucide-react";

@@ -26,12 +26,11 @@ export function LoginPage() {
     setLoading(true);
     setErrorMsg(null);
     
-    // Remove espaços em branco acidentais
     const cleanEmail = email.trim();
 
     try {
       if (isLogin) {
-        // LOGIN
+        // --- LOGIN ---
         const { data, error } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
@@ -40,8 +39,7 @@ export function LoginPage() {
         if (error) throw error;
         
         if (data.user) {
-             // Buscar perfil
-             const { data: profile, error: profileError } = await supabase
+             const { data: profile } = await supabase
               .from('profiles')
               .select('*')
               .eq('id', data.user.id)
@@ -52,8 +50,7 @@ export function LoginPage() {
                  toast.success(`Bem-vindo, ${profile.name}!`);
                  navigate("/dashboard");
              } else {
-                 // Se o usuário existe no Auth mas não tem perfil (caso raro agora que o trigger foi corrigido)
-                 console.warn("Perfil não encontrado no banco. Verifique se o script SQL foi executado.");
+                 // Fallback se o perfil não existir (mas login auth funcionou)
                  setUser({
                     id: data.user.id,
                     email: data.user.email!,
@@ -61,47 +58,45 @@ export function LoginPage() {
                     role: 'COMERCIAL'
                  });
                  navigate("/dashboard");
-                 toast.warning("Perfil incompleto. Contate o administrador.");
              }
         }
       } else {
-        // CADASTRO
+        // --- CADASTRO (SIGN UP) ---
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: cleanEmail,
           password,
           options: {
             data: {
               name: name,
-              role: 'COMERCIAL' // Padrão inicial, Admin pode mudar depois
+              role: 'ADMIN' // Criando como ADMIN para facilitar seu teste
             }
           }
         });
+        
         if (authError) throw authError;
 
         if (authData.user) {
-            toast.success("Conta criada com sucesso!");
-            // Se o Auto Confirm estiver desligado no Supabase, o usuário já loga
+            toast.success("Conta criada com sucesso! Você já pode entrar.");
+            // Auto login after signup if session exists
             if (authData.session) {
                 navigate("/dashboard");
             } else {
-                // Se precisar confirmar email
-                toast.info("Verifique seu email para confirmar o cadastro (se necessário).");
                 setIsLogin(true);
             }
         }
       }
     } catch (error: any) {
       console.error(error);
-      let msg = "Ocorreu um erro ao conectar.";
+      let msg = error.message;
       
-      if (error.message.includes("Invalid login credentials")) {
-          msg = "Email ou senha incorretos. Se você ainda não tem conta, clique em 'Solicite aqui' abaixo.";
-      } else if (error.message.includes("User already registered")) {
+      if (msg.includes("Invalid login credentials")) {
+          msg = "Usuário não encontrado ou senha incorreta.";
+      } else if (msg.includes("User already registered")) {
           msg = "Este email já está cadastrado. Tente fazer login.";
       }
       
       setErrorMsg(msg);
-      toast.error(msg);
+      toast.error("Erro de Autenticação");
     } finally {
       setLoading(false);
     }
@@ -109,10 +104,9 @@ export function LoginPage() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background relative overflow-hidden">
-      {/* Background decoration - Doce Mel Style */}
       <div className="absolute top-0 left-0 w-full h-1/2 bg-primary/10 -skew-y-3 origin-top-left z-0"></div>
       
-      <Card className="w-full max-w-md z-10 border-t-4 border-t-primary shadow-2xl dark:shadow-[0_4px_20px_-2px_rgba(255,255,255,0.05)] bg-card">
+      <Card className="w-full max-w-md z-10 border-t-4 border-t-primary shadow-2xl bg-card">
         <CardHeader className="text-center pb-2">
             <div className="mx-auto mb-6 flex items-center justify-center">
                 <div className="h-32 w-32 relative flex items-center justify-center bg-white rounded-full shadow-md p-3">
@@ -126,7 +120,7 @@ export function LoginPage() {
             <h1 className="text-2xl font-bold text-primary font-serif tracking-wide">GRUPO DOCE MEL</h1>
             <CardTitle className="text-lg font-medium text-foreground/80">Gestão de Devoluções</CardTitle>
             <CardDescription>
-                {isLogin ? "Entre com suas credenciais para acessar." : "Preencha os dados para criar sua conta."}
+                {isLogin ? "Entre com suas credenciais." : "Crie sua conta de Administrador."}
             </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
@@ -143,24 +137,22 @@ export function LoginPage() {
                     <Label htmlFor="name">Nome Completo</Label>
                     <Input 
                         id="name" 
-                        placeholder="Ex: João Silva" 
+                        placeholder="Ex: Obedys" 
                         value={name}
                         onChange={e => setName(e.target.value)}
                         required={!isLogin} 
-                        className="bg-background"
                     />
                 </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="email">Email Corporativo</Label>
+              <Label htmlFor="email">Email</Label>
               <Input 
                 id="email" 
                 type="email" 
-                placeholder="nome@docemel.com.br" 
+                placeholder="email@exemplo.com" 
                 value={email} 
                 onChange={e => setEmail(e.target.value)} 
                 required 
-                className="bg-background"
               />
             </div>
             <div className="space-y-2">
@@ -171,16 +163,15 @@ export function LoginPage() {
                 value={password} 
                 onChange={e => setPassword(e.target.value)} 
                 required 
-                className="bg-background"
               />
             </div>
           </CardContent>
           <CardFooter className="flex flex-col gap-4 bg-muted/20 pt-6">
-            <Button type="submit" className="w-full font-bold text-md h-11 shadow-md hover:shadow-lg transition-all" disabled={loading}>
+            <Button type="submit" className="w-full font-bold text-md h-11" disabled={loading}>
                 {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isLogin ? "ACESSAR SISTEMA" : "CRIAR CONTA"}
+                {isLogin ? "ENTRAR" : "CRIAR CONTA"}
             </Button>
-            <Button type="button" variant="link" onClick={() => { setIsLogin(!isLogin); setErrorMsg(null); }} className="text-muted-foreground hover:text-primary">
+            <Button type="button" variant="link" onClick={() => { setIsLogin(!isLogin); setErrorMsg(null); }}>
                 {isLogin ? "Não possui acesso? Solicite aqui" : "Já possui conta? Voltar ao login"}
             </Button>
           </CardFooter>
@@ -188,7 +179,7 @@ export function LoginPage() {
       </Card>
       
       <div className="absolute bottom-4 text-center text-xs text-muted-foreground opacity-50">
-        &copy; 2025 Grupo Doce Mel. Todos os direitos reservados.
+        &copy; 2025 Grupo Doce Mel.
       </div>
     </div>
   );
