@@ -12,7 +12,18 @@ import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { FilterBar } from "@/components/filters/FilterBar";
+import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  Legend
+} from 'recharts';
 
 export function ProfilePage() {
   const { user } = useAuthStore();
@@ -25,8 +36,12 @@ export function ProfilePage() {
   const [stats, setStats] = useState({
       myReturnsCount: 0,
       approvalRate: 0,
-      totalValue: 0
+      totalValue: 0,
+      avgCompanyTicket: 0,
+      avgCompanyReturns: 0
   });
+  const [timelineData, setTimelineData] = useState<any[]>([]);
+  const [summaryText, setSummaryText] = useState("");
 
   useEffect(() => {
     if (user) {
@@ -40,54 +55,127 @@ export function ProfilePage() {
   const fetchUserStats = async () => {
       if (!user) return;
 
-      // Buscar devoluções onde o vendedor é o usuário atual
-      // Nota: Isso depende do nome do vendedor bater com o nome do usuário
-      let query = supabase
-        .from('returns')
-        .select('*')
-        .ilike('seller_name', `%${user.name}%`);
+      // Buscar devoluções do usuário atual
+      let userQuery = supabase
+        .from('devolucoes')
+        .select('*');
+      
+      // Filtrar por vendedor se for VENDEDOR
+      if (user.role === 'VENDEDOR' && user.vendedor) {
+        userQuery = userQuery.eq('vendedor', user.vendedor);
+      } else {
+        // Para outros roles, buscar por nome do vendedor
+        userQuery = userQuery.ilike('vendedor', `%${user.name}%`);
+      }
 
       // Aplicar filtros de data do FilterBar
       if (filters.startDate) {
-          query = query.gte('invoice_date', filters.startDate.toISOString());
+          userQuery = userQuery.gte('data_emissao', filters.startDate.toISOString());
       }
       if (filters.endDate) {
-          query = query.lte('invoice_date', filters.endDate.toISOString());
+          userQuery = userQuery.lte('data_emissao', filters.endDate.toISOString());
       }
 
-      const { data: returns } = await query;
+      const { data: devolucoes } = await userQuery;
 
-      if (returns) {
-          const count = returns.length;
-          const total = returns.reduce((acc, curr) => acc + (curr.total_value || 0), 0);
+      // Buscar todas as devoluções para calcular média da empresa
+      let companyQuery = supabase
+        .from('devolucoes')
+        .select('*');
+      
+      if (filters.startDate) {
+          companyQuery = companyQuery.gte('data_emissao', filters.startDate.toISOString());
+      }
+      if (filters.endDate) {
+          companyQuery = companyQuery.lte('data_emissao', filters.endDate.toISOString());
+      }
+      
+      const { data: allDevolucoes } = await companyQuery;
+
+      if (devolucoes) {
+          const count = devolucoes.length;
+          const total = devolucoes.reduce((acc, curr) => acc + (Number(curr.valor_total_nota) || 0), 0);
           
-          // Calcular taxa de aprovação (se houver status final)
-          const finished = returns.filter(r => r.status !== 'PENDING');
-          const approved = returns.filter(r => r.status === 'APPROVED').length;
+          // Calcular taxa de aprovação baseado no resultado
+          const finished = devolucoes.filter(r => r.resultado && r.resultado !== 'PENDENTE VALIDAÇÃO');
+          const approved = devolucoes.filter(r => r.resultado === 'VALIDADA' || r.resultado === 'LANÇADA').length;
           const rate = finished.length > 0 ? (approved / finished.length) * 100 : 0;
+
+          // Calcular média da empresa
+          const companyCount = allDevolucoes?.length || 0;
+          const companyTotal = allDevolucoes?.reduce((acc, curr) => acc + (Number(curr.valor_total_nota) || 0), 0) || 0;
+          const avgCompanyTicket = companyCount > 0 ? companyTotal / companyCount : 0;
+          const myAvgTicket = count > 0 ? total / count : 0;
 
           setStats({
               myReturnsCount: count,
               totalValue: total,
-              approvalRate: Math.round(rate)
+              approvalRate: Math.round(rate),
+              avgCompanyTicket,
+              avgCompanyReturns: companyCount
           });
+
+          // Gráfico de linha: minhas devoluções no tempo
+          const groupedByMonth = devolucoes.reduce((acc: any, curr) => {
+              const date = new Date(curr.data_emissao || curr.created_at);
+              const month = format(date, 'MMM yyyy', { locale: ptBR });
+              if (!acc[month]) {
+                  acc[month] = { count: 0, value: 0 };
+              }
+              acc[month].count += 1;
+              acc[month].value += Number(curr.valor_total_nota) || 0;
+              return acc;
+          }, {});
+
+          const timeline = Object.entries(groupedByMonth)
+              .map(([name, data]: [string, any]) => ({
+                  name,
+                  quantidade: data.count,
+                  valor: data.value
+              }))
+              .sort((a, b) => {
+                  const dateA = new Date(a.name.split(' ')[1] + '-' + (ptBR.localize?.month?.parse(a.name.split(' ')[0]) || 0));
+                  const dateB = new Date(b.name.split(' ')[1] + '-' + (ptBR.localize?.month?.parse(b.name.split(' ')[0]) || 0));
+                  return dateA.getTime() - dateB.getTime();
+              });
+          
+          setTimelineData(timeline);
+
+          // Resumo textual automático melhorado
+          const comparison = myAvgTicket > avgCompanyTicket ? 'acima' : myAvgTicket < avgCompanyTicket ? 'abaixo' : 'igual';
+          const diffPercent = avgCompanyTicket > 0 ? Math.abs(((myAvgTicket - avgCompanyTicket) / avgCompanyTicket) * 100).toFixed(1) : '0';
+          
+          let summary = `Você registrou ${count} devoluções neste período, totalizando R$ ${total.toLocaleString('pt-BR')}. `;
+          summary += `Sua taxa de aprovação é de ${Math.round(rate)}%. `;
+          if (count > 0 && companyCount > 0) {
+              summary += `Seu ticket médio (R$ ${myAvgTicket.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}) está ${comparison} da média da empresa (R$ ${avgCompanyTicket.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}). `;
+              if (comparison !== 'igual') {
+                  summary += `Diferença de ${diffPercent}%. `;
+              }
+          }
+          summary += `A empresa registrou ${companyCount} devoluções no total neste período.`;
+          
+          setSummaryText(summary);
       }
   };
 
   const fetchAuditLogs = async () => {
       let query = supabase
-        .from('validation_logs')
+        .from('logs_validacao')
         .select(`
             *,
             user:profiles(name, email),
-            return:returns(invoice_number, customer_name)
+            devolucao:devolucoes(numero, nome_cliente)
         `)
         .order('created_at', { ascending: false })
         .limit(50);
       
-      // Filtros de data também aplicam aos logs se desejar
+      // Filtros de data também aplicam aos logs
       if (filters.startDate) {
           query = query.gte('created_at', filters.startDate.toISOString());
+      }
+      if (filters.endDate) {
+          query = query.lte('created_at', filters.endDate.toISOString());
       }
 
       const { data } = await query;
@@ -204,6 +292,87 @@ export function ProfilePage() {
                             </Card>
                         </div>
                         
+                        {/* Gráfico de linha: minhas devoluções no tempo */}
+                        {timelineData.length > 0 && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Minhas Devoluções no Tempo</CardTitle>
+                                    <CardDescription>Evolução mensal das suas devoluções</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <ResponsiveContainer width="100%" height={300}>
+                                        <LineChart data={timelineData}>
+                                            <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
+                                            <XAxis dataKey="name" className="text-xs" />
+                                            <YAxis yAxisId="left" className="text-xs" />
+                                            <YAxis yAxisId="right" orientation="right" className="text-xs" tickFormatter={(value) => `R$${value}`} />
+                                            <Tooltip 
+                                                contentStyle={{ 
+                                                    backgroundColor: 'var(--card)', 
+                                                    borderRadius: '8px', 
+                                                    border: '1px solid var(--border)',
+                                                    color: 'var(--foreground)'
+                                                }}
+                                                formatter={(value: number | undefined, name: string) => {
+                                                    if (name === 'quantidade') return [value, 'Quantidade'];
+                                                    if (name === 'valor') return [`R$ ${(value || 0).toLocaleString('pt-BR')}`, 'Valor'];
+                                                    return [value, name];
+                                                }}
+                                            />
+                                            <Legend />
+                                            <Line yAxisId="left" type="monotone" dataKey="quantidade" stroke="#073e29" strokeWidth={2} name="Quantidade" />
+                                            <Line yAxisId="right" type="monotone" dataKey="valor" stroke="#4a9170" strokeWidth={2} name="Valor (R$)" />
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </CardContent>
+                            </Card>
+                        )}
+                        
+                        {/* Comparação com média da empresa */}
+                        {stats.myReturnsCount > 0 && stats.avgCompanyReturns > 0 && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Comparação com Média da Empresa</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="grid gap-4 md:grid-cols-2">
+                                        <div className="space-y-2">
+                                            <div className="text-sm text-muted-foreground">Seu Ticket Médio</div>
+                                            <div className="text-2xl font-bold">
+                                                R$ {stats.myReturnsCount > 0 ? (stats.totalValue / stats.myReturnsCount).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '0'}
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="text-sm text-muted-foreground">Ticket Médio da Empresa</div>
+                                            <div className="text-2xl font-bold text-muted-foreground">
+                                                R$ {stats.avgCompanyTicket.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {stats.myReturnsCount > 0 && (
+                                        <div className="mt-4 p-3 bg-muted/50 rounded-lg">
+                                            <div className="text-sm">
+                                                {stats.totalValue / stats.myReturnsCount > stats.avgCompanyTicket ? (
+                                                    <span className="text-orange-600 dark:text-orange-400">
+                                                        ⚠️ Seu ticket médio está {(stats.totalValue / stats.myReturnsCount / stats.avgCompanyTicket * 100 - 100).toFixed(1)}% acima da média da empresa.
+                                                    </span>
+                                                ) : stats.totalValue / stats.myReturnsCount < stats.avgCompanyTicket ? (
+                                                    <span className="text-green-600 dark:text-green-400">
+                                                        ✅ Seu ticket médio está {(100 - stats.totalValue / stats.myReturnsCount / stats.avgCompanyTicket * 100).toFixed(1)}% abaixo da média da empresa.
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-blue-600 dark:text-blue-400">
+                                                        📊 Seu ticket médio está igual à média da empresa.
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        )}
+                        
+                        {/* Resumo textual automático */}
                         <div className="rounded-lg border p-6 bg-card flex items-start gap-4 shadow-sm">
                             <div className="p-3 bg-primary/10 rounded-full">
                                 <BarChart3 className="h-6 w-6 text-primary" />
@@ -211,9 +380,9 @@ export function ProfilePage() {
                             <div>
                                 <h3 className="font-semibold text-lg mb-1">Resumo Automático</h3>
                                 <p className="text-sm text-muted-foreground leading-relaxed">
-                                    {stats.myReturnsCount > 0 
+                                    {summaryText || (stats.myReturnsCount > 0 
                                         ? `Você registrou ${stats.myReturnsCount} devoluções neste período, totalizando R$ ${stats.totalValue.toLocaleString('pt-BR')}. Sua taxa de aprovação atual é de ${stats.approvalRate}%.`
-                                        : "Nenhuma atividade registrada para o período selecionado. Ajuste os filtros acima para ver seu histórico."
+                                        : "Nenhuma atividade registrada para o período selecionado. Ajuste os filtros acima para ver seu histórico.")
                                     }
                                 </p>
                             </div>
@@ -238,14 +407,22 @@ export function ProfilePage() {
                                             <TableCell className="text-xs">
                                                 {format(new Date(log.created_at), 'dd/MM/yyyy HH:mm')}
                                             </TableCell>
-                                            <TableCell className="font-medium">{log.user?.name}</TableCell>
-                                            <TableCell>{log.return?.invoice_number}</TableCell>
+                                            <TableCell className="font-medium">{log.user?.name || 'Sistema'}</TableCell>
+                                            <TableCell>{log.devolucao?.numero || log.devolucao_id?.slice(0, 8) || '-'}</TableCell>
                                             <TableCell>
-                                                <Badge variant={log.action === 'APPROVED' ? 'default' : 'destructive'}>
-                                                    {log.action === 'APPROVED' ? 'Aprovou' : 'Rejeitou'}
+                                                <Badge variant={
+                                                    log.acao === 'SELECIONAR_MOTIVO' || log.status_novo === 'VALIDADA' ? 'default' : 
+                                                    log.status_novo === 'TRATATIVA DE ANULAÇÃO' ? 'destructive' : 
+                                                    'secondary'
+                                                }>
+                                                    {log.acao === 'SELECIONAR_MOTIVO' ? 'Validou' : 
+                                                     log.acao === 'ALTERAR_RESULTADO' ? 'Alterou Resultado' :
+                                                     log.acao || 'Ação'}
                                                 </Badge>
                                             </TableCell>
-                                            <TableCell className="text-muted-foreground text-xs">{log.previous_status}</TableCell>
+                                            <TableCell className="text-muted-foreground text-xs">
+                                                {log.status_anterior} → {log.status_novo}
+                                            </TableCell>
                                         </TableRow>
                                     ))}
                                     {auditLogs.length === 0 && (

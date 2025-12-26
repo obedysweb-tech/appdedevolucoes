@@ -1,4 +1,4 @@
-export type UserRole = "GESTOR" | "COMERCIAL" | "LOGISTICA" | "ADMIN";
+export type UserRole = "GESTOR" | "COMERCIAL" | "LOGISTICA" | "ADMIN" | "VENDEDOR";
 
 export interface User {
   id: string;
@@ -7,6 +7,7 @@ export interface User {
   role: UserRole;
   avatar_url?: string;
   created_at?: string;
+  vendedor?: string | null;
 }
 
 export interface Sector {
@@ -73,11 +74,12 @@ export interface Filters {
   startDate?: Date;
   endDate?: Date;
   period?: Period;
-  seller?: string[];
-  city?: string[];
-  customer?: string[];
+  vendedor?: string[];
+  cidade?: string[];
+  cliente?: string[];
   uf?: string[];
-  network?: string[];
-  reason?: string[];
-  sector?: string[];
+  rede?: string[];
+  motivo?: string[];
+  setor?: string[];
+  resultado?: string[];
 }

@@ -1,0 +1,968 @@
+CRIAR UM APLICATIVO WEB RESPONSIVO 
+
+NEXT.JS
+SHADCN
+TYPERSCRIPT
+
+TELAS:
+
+LOGIN
+DASHBOARD
+RESUMO
+RELATÓRIOS
+CONFIGURAÇÕES
+PERFIL
+
+TELA
+
+🎯 VISÃO GERAL (Dashboard Principal)
+KPIs (cards no topo)
+•	🔁 Total de devoluções (período)
+•	💰 Valor total devolvido
+•	📦 Quantidade de produtos devolvidos
+•	👥 Clientes com mais devoluções
+•	🧑‍💼 Vendedores com maior índice de devolução
+•	📊 Taxa de devolução (%)
+•	⏱ Tempo médio até a devolução
+•	⚠️ Devoluções fora do SLA
+________________________________________
+📊 GRÁFICOS ESSENCIAIS
+1️⃣ Evolução no Tempo
+•	Linha / Área
+o	Devoluções por dia / semana / mês
+o	Valor devolvido ao longo do tempo
+•	Insight:
+o	📈 Tendência de aumento ou queda
+o	Sazonalidade (datas específicas)
+________________________________________
+2️⃣ Motivos de Devolução
+•	Pizza ou Barra
+o	Defeito
+o	Produto errado
+o	Avaria no transporte
+o	Arrependimento
+o	Outros
+•	Insight:
+o	🎯 Qual causa atacar primeiro
+________________________________________
+3️⃣ Devoluções por Produto
+•	Barra horizontal
+o	Top 10 produtos mais devolvidos
+•	Heatmap
+o	Produto × Motivo
+•	Insight:
+o	🧨 Produtos problemáticos
+________________________________________
+4️⃣ Devoluções por Cliente
+•	Barra
+o	Clientes com maior volume
+•	Dispersão
+o	Valor comprado × valor devolvido
+•	Insight:
+o	🚩 Clientes com comportamento atípico
+________________________________________
+5️⃣ Devoluções por Vendedor
+•	Ranking em barras
+•	Boxplot
+o	Comparar vendedores
+•	Insight:
+o	🧑‍🏫 Necessidade de treinamento
+________________________________________
+6️⃣ Devoluções Geográficas
+•	Mapa (UF / Cidade)
+•	Mapa de calor
+•	Insight:
+o	🌎 Regiões com maior índice de devolução
+________________________________________
+7️⃣ Tempo de Processamento
+•	Histograma
+o	Dias até a devolução
+•	Linha
+o	SLA médio por período
+•	Insight:
+o	⏳ Gargalos operacionais
+________________________________________
+📋 TABELAS INTELIGENTES (com filtros)
+•	Devoluções detalhadas
+•	Produtos mais devolvidos
+•	Clientes reincidentes
+•	Vendedores
+•	Cidades / UF
+•	Motivos + valor + quantidade
+💡 Funcionalidades:
+•	Filtro por data, cliente, produto, vendedor, cidade, UF
+•	Ordenação dinâmica
+•	Exportar CSV / Excel / PDF
+________________________________________
+🚨 ALERTAS AUTOMÁTICOS
+Alertas Operacionais
+•	⚠️ Produto com devoluções acima da média
+•	⚠️ Cliente com aumento súbito de devoluções
+•	⚠️ Vendedor acima do limite aceitável
+•	⚠️ Cidade/UF fora do padrão histórico
+•	⚠️ SLA estourado
+________________________________________
+Alertas Financeiros
+•	💸 Valor devolvido acima do limite mensal
+•	📉 Margem impactada por devoluções
+________________________________________
+Alertas Inteligentes (avançado)
+•	🤖 Anomalias estatísticas
+•	🤖 Crescimento inesperado em curto período
+•	🤖 Comparação com média histórica
+________________________________________
+📑 RELATÓRIOS AUTOMÁTICOS
+Relatórios Periódicos
+•	Diário / semanal / mensal
+•	Por:
+o	Cliente
+o	Produto
+o	Vendedor
+o	Região
+o	UF
+Conteúdo
+•	Resumo executivo
+•	KPIs
+•	Gráficos principais
+•	Ranking
+•	Alertas do período
+📤 Envio automático por:
+•	E-mail
+•	WhatsApp
+•	PDF
+________________________________________
+🧠 INSIGHTS E MENSAGENS AUTOMÁTICAS
+Exemplos de mensagens:
+•	🧠 “O produto X teve aumento de 35% nas devoluções este mês.”
+•	🚨 “O cliente Y devolveu acima da média histórica.”
+•	📍 “A cidade Z apresentou crescimento anormal.”
+•	🧑‍💼 “O vendedor A possui taxa 2x maior que a média.”
+•	📦 “80% das devoluções estão concentradas em 20% dos produtos.”
+________________________________________
+📈 GRÁFICOS AVANÇADOS (DIFERENCIAL)
+•	Pareto (80/20) – principais causas
+•	Cohort Analysis – devoluções por safra/cliente
+•	Funnel
+o	Venda → Entrega → Devolução → Reembolso
+•	Correlação
+o	Produto × vendedor × região
+________________________________________
+⚙️ EXTRAS QUE DÃO MUITO VALOR
+•	Comparação período atual × anterior
+•	Benchmark interno
+•	Metas e semáforo (verde / amarelo / vermelho)
+•	Forecast de devoluções
+•	Score de risco por cliente/produto
+🧱 STACK DEFINIDA
+•	Next.js (App Router)
+•	TypeScript
+•	shadcn/ui (UI consistente e responsiva)
+•	Supabase
+o	Auth (login)
+o	Database (PostgreSQL)
+o	Storage (arquivos CSV/XLSX)
+•	Chart lib: Recharts ou Tremor
+•	Parser CSV/XLSX: papaparse + xlsx
+________________________________________
+👥 TIPOS DE USUÁRIOS (RBAC)
+type UserRole = "GESTOR" | "COMERCIAL" | "LOGISTICA" | "ADMIN";
+Tela	Gestor	Comercial	Logística	Admin
+Login	✅	✅	✅	✅
+Dashboard	✅	✅	✅	✅
+Resumo	❌	✅	✅	✅
+Relatórios	✅	✅	✅	✅
+Sincronização	❌	❌	✅	✅
+Configurações	❌	❌	❌	✅
+Perfil	✅	✅	✅	✅
+________________________________________
+🗂️ ESTRUTURA DE PASTAS (Next.js App Router)
+src/
+ ├─ app/
+ │   ├─ (auth)/
+ │   │   └─ login/
+ │   │       └─ page.tsx
+ │   ├─ (protected)/
+ │   │   ├─ dashboard/
+ │   │   ├─ resumo/
+ │   │   ├─ relatorios/
+ │   │   ├─ sincronizacao/
+ │   │   ├─ configuracoes/
+ │   │   └─ perfil/
+ │   ├─ layout.tsx
+ │   └─ page.tsx
+ ├─ components/
+ │   ├─ sidebar.tsx
+ │   ├─ header.tsx
+ │   ├─ kpi-card.tsx
+ │   ├─ charts/
+ │   └─ tables/
+ ├─ lib/
+ │   ├─ supabase.ts
+ │   ├─ auth.ts
+ │   ├─ rbac.ts
+ │   └─ permissions.ts
+ ├─ hooks/
+ ├─ types/
+ └─ utils/
+________________________________________
+🔐 CONTROLE DE ACESSO (RBAC)
+Mapeamento de permissões
+export const permissions = {
+  dashboard: ["GESTOR", "COMERCIAL", "LOGISTICA", "ADMIN"],
+  resumo: ["COMERCIAL", "LOGISTICA", "ADMIN"],
+  relatorios: ["GESTOR", "COMERCIAL", "LOGISTICA", "ADMIN"],
+  sincronizacao: ["LOGISTICA", "ADMIN"],
+  configuracoes: ["ADMIN"],
+  perfil: ["GESTOR", "COMERCIAL", "LOGISTICA", "ADMIN"],
+};
+Guard de rota
+export function hasAccess(role: UserRole, page: keyof typeof permissions) {
+  return permissions[page].includes(role);
+}
+________________________________________
+🔑 LOGIN (Supabase Auth)
+•	Email + senha
+•	Role salvo em:
+o	public.users (id, role, name, ...)
+•	Após login:
+o	Buscar role
+o	Redirecionar para /dashboard
+________________________________________
+📊 TELAS — O QUE CADA UMA FAZ
+🔵 DASHBOARD (Todos)
+Visão executiva
+•	KPIs:
+o	Total devoluções
+o	Valor devolvido
+o	Taxa de devolução
+o	SLA médio
+•	Gráficos:
+o	Linha: devoluções no tempo
+o	Barra: top produtos
+o	Mapa: UF / cidade
+•	Filtros globais:
+o	Data, cliente, produto, vendedor, UF
+________________________________________
+🟢 RESUMO (Comercial, Logística, Admin)
+•	Cards por:
+o	Produto
+o	Cliente
+o	Vendedor
+•	Pareto 80/20
+•	Insights automáticos (texto)
+________________________________________
+📈 RELATÓRIOS (Todos)
+•	Tabelas avançadas:
+o	Devoluções detalhadas
+•	Filtros dinâmicos
+•	Exportação:
+o	CSV
+o	XLSX
+o	PDF
+•	Comparativo período atual × anterior
+________________________________________
+🔄 SINCRONIZAÇÃO (Logística, Admin)
+Upload de arquivos
+•	CSV
+•	XLSX
+Fluxo
+1.	Upload
+2.	Preview dos dados
+3.	Validação:
+o	Campos obrigatórios
+o	Datas
+o	Valores
+4.	Confirmação
+5.	Persistência no Supabase
+Histórico
+•	Arquivos importados
+•	Status (sucesso / erro)
+________________________________________
+⚙️ CONFIGURAÇÕES (Admin)
+•	Usuários:
+o	Criar / editar
+o	Alterar perfil
+•	Parâmetros:
+o	SLA
+o	Limites de alerta
+•	Motivos de devolução
+•	Produtos (master data)
+________________________________________
+👤 PERFIL (Todos)
+•	Dados do usuário
+•	Alterar senha
+•	Preferências
+•	Gráficos do usuário
+•	Totais do usuário
+•	Resumo do usuario
+•	Tema (dark/light)
+________________________________________
+🗄️ MODELAGEM BÁSICA DO BANCO (Supabase)
+users
+id uuid
+name text
+email text
+role text
+senha
+returns (devoluções)
+id uuid
+cliente text
+produto text
+vendedor text
+cidade text
+uf text
+motivo text
+quantidade int
+valor numeric
+data date
+uploads
+id uuid
+filename text
+status text
+uploaded_at timestamp
+user_id uuid
+________________________________________
+🚨 ALERTAS (FUTURO)
+•	Trigger SQL ou Edge Functions:
+o	Produto acima da média
+o	Cliente reincidente
+•	Notificação:
+o	Badge no dashboard
+o	Email / WhatsApp
+________________________________________
+🎨 UI (shadcn)
+•	Sidebar com itens filtrados por role
+•	Cards com Card, Badge, Tabs
+•	Tabelas com DataTable
+•	Charts com layout responsivo
+•	Dark mode nativo
+
+
+Na tela de login, função de cadastro de usuário.
+Cadastro de usuário:
+
+Nome do usuário
+Email
+Senha
+na tela de perfil, o usuario vai ver graficos, cards, resumo das suas devolucoes quero filtros nas telas de resumo, dashboard, perfil, relatorios. filtros: dinamico (de pesquisa digitacional que buscar qualquer informação) entre datas periodo: hoje, ontem, essa semana, semana passada, mes atual, mes anterior, trimestre atual, semestre atual, ano atual. vendedor cidade cliente UF rede motivo setor
+Perfeito 👍
+Com isso dá pra deixar o app bem profissional, consistente e escalável. Vou te entregar:
+1.	Como desenhar o sistema de filtros (global e reutilizável)
+2.	Como cada tela usa esses filtros
+3.	O que mostrar na tela PERFIL (gráficos, cards, resumo)
+4.	Modelo de dados para suportar os filtros
+5.	UX/UI com shadcn
+Tudo pensado para Next.js + TypeScript + Supabase.
+________________________________________
+🧠 CONCEITO-CHAVE: FILTROS GLOBAIS
+👉 Você NÃO quer implementar filtros diferentes em cada tela.
+O ideal é um FilterContext global, reutilizado em:
+•	Dashboard
+•	Resumo
+•	Relatórios
+•	Perfil
+________________________________________
+🎛️ FILTROS DEFINIDOS
+🎯 Tipos de filtros
+•	🔍 Pesquisa dinâmica (digitacional)
+o	Busca em: cliente, produto, vendedor, cidade, UF, motivo, rede, setor
+•	📅 Entre datas (date range)
+•	⏱ Período pré-definido
+o	Hoje
+o	Ontem
+o	Esta semana
+o	Semana passada
+o	Mês atual
+o	Mês anterior
+o	Trimestre atual
+o	Semestre atual
+o	Ano atual
+•	👤 Vendedor
+•	🏙 Cidade
+•	🧾 Cliente
+•	🗺 UF
+•	🏪 Rede
+•	📦 Motivo
+•	🏭 Setor
+________________________________________
+🧩 MODELO DE FILTROS (TYPE SAFE)
+export type Period =
+  | "TODAY"
+  | "YESTERDAY"
+  | "THIS_WEEK"
+  | "LAST_WEEK"
+  | "THIS_MONTH"
+  | "LAST_MONTH"
+  | "THIS_QUARTER"
+  | "THIS_SEMESTER"
+  | "THIS_YEAR";
+
+export interface Filters {
+  search?: string;
+  startDate?: Date;
+  endDate?: Date;
+  period?: Period;
+  vendedor?: string[];
+  cidade?: string[];
+  cliente?: string[];
+  uf?: string[];
+  rede?: string[];
+  motivo?: string[];
+  setor?: string[];
+}
+________________________________________
+🧱 FILTER CONTEXT (GLOBAL)
+const FilterContext = createContext<{
+  filters: Filters;
+  setFilters: (filters: Filters) => void;
+}>({} as any);
+
+export function FilterProvider({ children }: Props) {
+  const [filters, setFilters] = useState<Filters>({});
+
+  return (
+    <FilterContext.Provider value={{ filters, setFilters }}>
+      {children}
+    </FilterContext.Provider>
+  );
+}
+➡️ Envolver o (protected)/layout.tsx com esse provider.
+________________________________________
+🎨 UI DOS FILTROS (shadcn)
+🔝 Barra fixa de filtros (topo)
+Componentes:
+•	Input → 🔍 Pesquisa dinâmica
+•	Select → Período
+•	DatePicker → Entre datas
+•	MultiSelect → vendedor, cliente, cidade, UF, etc
+•	Button → Limpar filtros
+•	Badge → filtros ativos
+💡 UX:
+•	Filtros colapsáveis
+•	Chips mostrando filtros ativos
+•	Persistir filtros (localStorage ou URL)
+________________________________________
+📊 COMO CADA TELA USA OS FILTROS
+________________________________________
+🔵 DASHBOARD
+Cards (KPIs)
+•	Total devoluções
+•	Valor devolvido
+•	Taxa de devolução
+•	SLA médio
+➡️ Todos calculados com base nos filtros ativos
+Gráficos
+•	Linha: devoluções no tempo
+•	Barra: produtos / motivos
+•	Mapa: UF / cidade
+________________________________________
+🟢 RESUMO
+Cards por dimensão
+•	Produto
+•	Cliente
+•	Vendedor
+•	Rede
+•	Setor
+Gráficos
+•	Pareto 80/20
+•	Ranking
+Insights automáticos
+“80% das devoluções vêm de 3 produtos neste período”
+________________________________________
+👤 PERFIL (NOVIDADE IMPORTANTE)
+Aqui o filtro automático é o usuário logado.
+🎯 Regra
+•	Usuário vê somente devoluções relacionadas a ele
+o	Ex: vendedor = usuário
+o	ou cliente = usuário (dependendo do papel)
+Cards
+•	Minhas devoluções
+•	Valor total devolvido
+•	Taxa de devolução pessoal
+•	Ranking (posição)
+Gráficos
+•	Linha: minhas devoluções no tempo
+•	Barra: motivos mais comuns
+•	Comparação:
+o	“Você × média da empresa”
+Resumo textual
+•	“Você está acima/abaixo da média”
+•	“Principal motivo: X”
+________________________________________
+📈 RELATÓRIOS
+•	Tabela detalhada
+•	Todos os filtros ativos
+•	Agrupamentos:
+o	Por cliente
+o	Por vendedor
+o	Por cidade / UF
+•	Exportações respeitam filtros
+________________________________________
+🗄️ BANCO DE DADOS (SUPORTE A FILTROS)
+returns (
+  id uuid,
+  data date,
+  cliente text,
+  vendedor text,
+  cidade text,
+  uf text,
+  rede text,
+  setor text,
+  motivo text,
+  valor numeric,
+  quantidade int
+)
+📌 Criar índices:
+•	data
+•	vendedor
+•	cliente
+•	cidade
+•	uf
+•	rede
+•	setor
+________________________________________
+🔍 FILTRO DINÂMICO (SEARCH)
+No Supabase:
+or(
+  cliente.ilike.%search%,
+  vendedor.ilike.%search%,
+  cidade.ilike.%search%,
+  motivo.ilike.%search%,
+  rede.ilike.%search%
+)
+________________________________________
+⏱️ PERÍODOS AUTOMÁTICOS
+Função utilitária:
+getDateRange(period: Period): { start: Date; end: Date }
+Usada em TODAS as telas.
+________________________________________
+✨ DIFERENCIAIS UX
+•	Filtros sincronizados com URL
+•	Salvar filtros favoritos
+•	Comparação entre períodos
+•	Loading skeleton
+•	Mensagens inteligentes:
+“Nenhum dado encontrado para este filtro”
+SETOR MOTIVOS Vendas Acordo Comercial Vendas Devolucao Por Refaturamento Comercial Vendas Avaria Vendas Produto Em Desacordo Com O Pedido Vendas Diferenca De Preco Vendas Sem Devolutiva Comercial Vendas Excesso Mercadoria Vendas Mercadoria De Analise Qualidade Div. Padrao Qualidade Qualidade Falha Na Producao/Repasse: (Selecao Incorreta Dos Fruto Qualidade Acordo De Qualidade Logistica Falta Da Mercadoria Logistica Falta De Peso Logistica Falha Operacional Logistica Devolucao Por Refaturamento Operacional Logistica Atraso Na Entrega Logistica Falha No Transporte Logistica Sinistro Logistica Erro De Separacao Logistica Acordo Operacional Compras Compra Nao Conforme Compras Acordo De Compra Exportacoes Devolucao Exportacao Central Administrativa Devolucao Por Refaturamento Erro De Cadastro Cliente Devolucao Indevida 
+Perfeito — isso que você mandou é master data crítica do sistema.
+Vou te mostrar como transformar essa lista em algo profissional e reutilizável no seu app:
+1.	📦 Modelagem correta no Supabase
+2.	🧠 Estrutura Setor → Motivos
+3.	🎛️ Uso nos filtros (dependentes)
+4.	🧾 Seed SQL pronta
+5.	🧑‍💻 Tipos TypeScript
+6.	📊 Como explorar isso nos dashboards
+________________________________________
+1️⃣ CONCEITO CORRETO (IMPORTANTE)
+👉 Motivo SEMPRE pertence a um Setor
+👉 Setor é uma dimensão analítica
+👉 Motivo é uma causa específica da devolução
+Isso permite:
+•	Filtro por Setor
+•	Filtro por Motivo
+•	Gráficos: Devoluções por Setor, Motivos por Setor
+•	Alertas inteligentes por área responsável
+________________________________________
+2️⃣ MODELAGEM NO SUPABASE (RECOMENDADA)
+🗂️ Tabela: sectors
+create table sectors (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  created_at timestamp default now()
+);
+🗂️ Tabela: return_reasons
+create table return_reasons (
+  id uuid primary key default gen_random_uuid(),
+  sector_id uuid references sectors(id),
+  name text not null,
+  created_at timestamp default now(),
+  unique (sector_id, name)
+);
+🗂️ Relacionamento com devoluções
+alter table returns
+add column sector_id uuid references sectors(id),
+add column reason_id uuid references return_reasons(id);
+❗ Evite texto livre em returns.motivo
+Sempre use FK → isso garante qualidade nos dados.
+________________________________________
+3️⃣ SEED SQL (SEUS DADOS)
+🔹 Setores
+insert into sectors (name) values
+('Vendas'),
+('Qualidade'),
+('Logistica'),
+('Compras'),
+('Exportacoes'),
+('Central Administrativa'),
+('Cliente');
+🔹 Motivos
+-- VENDAS
+insert into return_reasons (sector_id, name)
+select s.id, r.name from sectors s,
+unnest(array[
+  'Acordo Comercial',
+  'Devolucao Por Refaturamento Comercial',
+  'Avaria',
+  'Produto Em Desacordo Com O Pedido',
+  'Diferenca De Preco',
+  'Sem Devolutiva Comercial',
+  'Excesso Mercadoria',
+  'Mercadoria De Analise'
+]) r(name)
+where s.name = 'Vendas';
+
+-- QUALIDADE
+insert into return_reasons (sector_id, name)
+select s.id, r.name from sectors s,
+unnest(array[
+  'Div. Padrao Qualidade',
+  'Falha Na Producao/Repasse: Selecao Incorreta Dos Frutos',
+  'Acordo De Qualidade'
+]) r(name)
+where s.name = 'Qualidade';
+
+-- LOGISTICA
+insert into return_reasons (sector_id, name)
+select s.id, r.name from sectors s,
+unnest(array[
+  'Falta Da Mercadoria',
+  'Falta De Peso',
+  'Falha Operacional',
+  'Devolucao Por Refaturamento Operacional',
+  'Atraso Na Entrega',
+  'Falha No Transporte',
+  'Sinistro',
+  'Erro De Separacao',
+  'Acordo Operacional'
+]) r(name)
+where s.name = 'Logistica';
+
+-- COMPRAS
+insert into return_reasons (sector_id, name)
+select s.id, r.name from sectors s,
+unnest(array[
+  'Compra Nao Conforme',
+  'Acordo De Compra'
+]) r(name)
+where s.name = 'Compras';
+
+-- EXPORTACOES
+insert into return_reasons (sector_id, name)
+select s.id, r.name from sectors s,
+unnest(array[
+  'Devolucao Exportacao'
+]) r(name)
+where s.name = 'Exportacoes';
+
+-- CENTRAL ADMINISTRATIVA
+insert into return_reasons (sector_id, name)
+select s.id, r.name from sectors s,
+unnest(array[
+  'Devolucao Por Refaturamento Erro De Cadastro'
+]) r(name)
+where s.name = 'Central Administrativa';
+
+-- CLIENTE
+insert into return_reasons (sector_id, name)
+select s.id, r.name from sectors s,
+unnest(array[
+  'Devolucao Indevida'
+]) r(name)
+where s.name = 'Cliente';
+________________________________________
+4️⃣ TIPOS TYPESCRIPT (FRONTEND)
+export interface Sector {
+  id: string;
+  name: string;
+}
+
+export interface ReturnReason {
+  id: string;
+  name: string;
+  sector_id: string;
+  sector?: Sector;
+}
+________________________________________
+5️⃣ FILTROS DEPENDENTES (UX PROFISSIONAL)
+🎛️ Comportamento esperado
+•	Usuário escolhe Setor
+•	Campo Motivo mostra apenas motivos daquele setor
+Exemplo lógico:
+const filteredReasons = reasons.filter(
+  r => selectedSectors.includes(r.sector_id)
+);
+💡 Isso evita erro humano e melhora muito a análise.
+________________________________________
+6️⃣ COMO USAR NOS GRÁFICOS & DASHBOARD
+📊 Gráficos recomendados
+🔹 Barra
+•	Devoluções por Setor
+🔹 Barra empilhada
+•	Setor × Motivo
+🔹 Pareto
+•	Motivos mais impactantes (valor)
+🔹 Heatmap
+•	Setor × UF
+•	Setor × Vendedor
+________________________________________
+7️⃣ ALERTAS INTELIGENTES (EXEMPLOS)
+•	🚨 “Logística teve aumento de 22% em devoluções por Atraso na Entrega”
+•	🚨 “Qualidade responde por 40% das devoluções neste mês”
+•	🚨 “Motivo ‘Erro de Separação’ acima da média histórica”
+________________________________________
+8️⃣ BOAS PRÁTICAS IMPORTANTES
+✅ Não permitir cadastro livre de motivo
+✅ Manter histórico (não apagar motivos antigos)
+✅ Logs de alteração (Admin)
+
+TELA DE CONFIGURAÇÕES:
+
+USUARIO ADMIN PODE CADASTRAR NOVOS MOTIVOS, VENDEDORES, CLIENTES (REDE, UF, CIDADE, ETC), E CRIAR NOVOS USUARIOS. TAMBEM PODE ALTERAR QUALQUER USUARIO E SEU TIPO, SUA SENHA, NOME, E PODE EXCLUIR TAMBEM. 
+
+NA TELA DE PERFIL, O USUARIO ADMINISTRADOR VERÁ AS ULTIMAS ALTERAÇÕES DOS USUARIOS REALIZOU NA TELA DE VALIDAÇÃO (RESUMO = TELA DE VALIDAÇÃO)
+
+TROCAR O NOME DA TELA DE RESUMO PARA VALIDAÇÃO.
+LEMBRANDO QUE NA TELA DE SINCRONIZAÇÃO, AO IMPORTAR O XLSX OU CSV, VAI SALVAR NO APP AS INFORMAÇÕES DAS COLUNAS E INFORMAÇÕES QUE TEM “APARECER” E NO SUPABASE VAI SALVAR TODAS AS COLUNAS E INFORMAÇÕES. EXEMPLO NO PRINT DAS COLUNAS EM ANEXO.
+
+COLUNAS	TABELA SUPABASE	TABELA VISUAL NO APP
+CNPJ Destinatário	MANTER	NÃO APARECER
+Destinatário	MANTER	NÃO APARECER
+Nome Filial	DA LISTA DE FILIAIS (VAI SE BASEAR NO CNPJ X TABELA FILIAIS)	APARECER
+Cidade Destino	MANTER	NÃO APARECER
+UF Destino	MANTER	NÃO APARECER
+CNPJ Emitente	MANTER	NÃO APARECER
+Nome PJ Emitente	MANTER	NÃO APARECER
+Nome Cliente	DA LISTA DE CLIENTES (VAI SE BASEAR NO CNPJ X TABELA CLIENTES)	APARECER
+Cidade Origem	MANTER	APARECER
+UF Origem	MANTER	APARECER
+Chave de Acesso	MANTER	NÃO APARECER
+Data Emissão	MANTER	APARECER
+Número	MANTER	APARECER
+Série	MANTER	NÃO APARECER
+Valor Total da Nota	MANTER	APARECER
+Peso líquido	MANTER	APARECER
+Tipo	MANTER	NÃO APARECER
+Status	MANTER	NÃO APARECER
+Sincronização ERP	MANTER	APARECER
+Nome ou e-mail do usuário que fez a sincronização	MANTER	NÃO APARECER
+Data da sincronização	MANTER	NÃO APARECER
+Finalidade NFe	MANTER	APARECER
+Natureza Operação	MANTER	NÃO APARECER
+CFOPs da Nota	MANTER	NÃO APARECER
+Dados Adicionais	MANTER	APARECER
+[Item] Descrição	MANTER	APARECER (FICA OCULTO COM SETA DE CLIQUE PARA EXPANSÃO E INFORMAÇÃO COMPLETA)
+[Item] Unidade	MANTER	APARECER (FICA OCULTO COM SETA DE CLIQUE PARA EXPANSÃO E INFORMAÇÃO COMPLETA)
+[Item] Quantidade	MANTER	APARECER (FICA OCULTO COM SETA DE CLIQUE PARA EXPANSÃO E INFORMAÇÃO COMPLETA)
+[Item] Valor Unitário	MANTER	APARECER (FICA OCULTO COM SETA DE CLIQUE PARA EXPANSÃO E INFORMAÇÃO COMPLETA)
+[Item] Valor Total Bruto	MANTER	APARECER (FICA OCULTO COM SETA DE CLIQUE PARA EXPANSÃO E INFORMAÇÃO COMPLETA)
+[Item] Número do Item.	MANTER	APARECER (FICA OCULTO COM SETA DE CLIQUE PARA EXPANSÃO E INFORMAÇÃO COMPLETA)
+Etiquetas	MANTER	NÃO APARECER
+Vendedor	DA LISTA DE VENDEDORES (VAI SE BASEAR NA TABELA CLIENTES)	APARECER
+Motivo	DA LISTA DE MOTIVOS (TABELA DE MOTIVOS)	APARECER
+Justificativa	MANTER	APARECER
+Resultado	DA LISTA DE RESULTADOS	APARECER
+
+RESUMO GERAL DO PROMPT DO APP:
+
+📌 ESPECIFICAÇÃO DO APLICATIVO WEB DE DEVOLUÇÕES
+1️⃣ OBJETIVO DO SISTEMA
+Criar um aplicativo web responsivo para gestão, análise e validação de devoluções, com dashboards, relatórios, alertas e ingestão de dados via CSV/XLSX, atendendo diferentes perfis de usuários.
+________________________________________
+2️⃣ STACK TECNOLÓGICA
+•	Frontend
+o	Next.js (App Router)
+o	TypeScript
+o	shadcn/ui
+•	Backend / Infra
+o	Supabase
+	Auth (login/cadastro)
+	PostgreSQL (database)
+	Storage (arquivos CSV/XLSX)
+•	Gráficos
+o	Recharts ou Tremor
+•	Importação de arquivos
+o	papaparse (CSV)
+o	xlsx (Excel)
+________________________________________
+3️⃣ TELAS DO SISTEMA
+Telas disponíveis
+•	Login (com cadastro de usuário)
+•	Dashboard
+•	Validação (antiga “Resumo”)
+•	Relatórios
+•	Sincronização
+•	Configurações
+•	Perfil
+➡️ Todos os usuários têm acesso à tela de Login
+________________________________________
+4️⃣ TIPOS DE USUÁRIOS (RBAC)
+type UserRole = "GESTOR" | "COMERCIAL" | "LOGISTICA" | "ADMIN";
+Tela	Gestor	Comercial	Logística	Admin
+Login	✅	✅	✅	✅
+Dashboard	✅	✅	✅	✅
+Validação	❌	✅	✅	✅
+Relatórios	✅	✅	✅	✅
+Sincronização	❌	❌	✅	✅
+Configurações	❌	❌	❌	✅
+Perfil	✅	✅	✅	✅
+________________________________________
+5️⃣ DASHBOARD (VISÃO EXECUTIVA)
+KPIs (cards)
+•	Total de devoluções (período)
+•	Valor total devolvido
+•	Quantidade de produtos devolvidos
+•	Clientes com mais devoluções
+•	Vendedores com maior índice de devolução
+•	Taxa de devolução (%)
+•	Tempo médio até devolução
+•	Devoluções fora do SLA
+Gráficos
+•	Evolução no tempo (linha/área)
+•	Motivos de devolução (barra/pizza)
+•	Top produtos devolvidos
+•	Devoluções por cliente
+•	Devoluções por vendedor
+•	Mapa geográfico (UF / Cidade)
+•	Tempo de processamento (SLA)
+________________________________________
+6️⃣ VALIDAÇÃO (ANTIGA RESUMO)
+Tela focada em conferência e validação operacional.
+•	Cards por:
+o	Produto
+o	Cliente
+o	Vendedor
+o	Rede
+o	Setor
+•	Pareto 80/20
+•	Rankings
+•	Insights automáticos
+•	Lista de devoluções pendentes de validação
+________________________________________
+7️⃣ RELATÓRIOS
+•	Tabelas detalhadas
+•	Agrupamentos:
+o	Cliente
+o	Produto
+o	Vendedor
+o	Cidade / UF
+o	Setor / Motivo
+•	Comparação entre períodos
+•	Exportação:
+o	CSV
+o	XLSX
+o	PDF
+________________________________________
+8️⃣ PERFIL DO USUÁRIO
+Para todos os usuários
+•	Dados pessoais
+•	Alteração de senha
+•	Preferências
+•	Tema (dark/light)
+Informações analíticas
+•	Cards com métricas do próprio usuário
+•	Gráficos pessoais
+•	Comparação com média da empresa
+•	Resumo textual automático
+Extra (Admin)
+•	Visualizar histórico de alterações realizadas na tela de Validação
+________________________________________
+9️⃣ FILTROS GLOBAIS (TODAS AS TELAS)
+Tipos de filtros
+•	🔍 Pesquisa dinâmica (texto livre)
+•	📅 Intervalo de datas
+•	⏱ Períodos rápidos:
+o	Hoje
+o	Ontem
+o	Esta semana / semana passada
+o	Mês atual / mês anterior
+o	Trimestre atual
+o	Semestre atual
+o	Ano atual
+•	Filtros por:
+o	Vendedor
+o	Cliente
+o	Cidade
+o	UF
+o	Rede
+o	Setor
+o	Motivo
+➡️ Filtros compartilhados via FilterContext global
+________________________________________
+🔄 10️⃣ SINCRONIZAÇÃO (CSV / XLSX)
+Fluxo
+1.	Upload do arquivo
+2.	Preview dos dados
+3.	Validação
+4.	Confirmação
+5.	Persistência no Supabase
+Regra importante
+•	Supabase: salva todas as colunas
+•	App (visual): exibe apenas colunas marcadas como “APARECER”
+________________________________________
+11️⃣ REGRAS DE COLUNAS (IMPORTAÇÃO)
+Exemplo de comportamento
+Coluna	Supabase	App
+CNPJ Destinatário	Manter	Não aparecer
+Nome Filial	Derivado da tabela Filiais	Aparecer
+Nome Cliente	Derivado da tabela Clientes	Aparecer
+UF Origem	Manter	Aparecer
+Valor Total da Nota	Manter	Aparecer
+Itens da Nota	Manter	Aparecer (expansível)
+Motivo	Tabela de Motivos	Aparecer
+Resultado	Tabela de Resultados	Aparecer
+➡️ Itens da nota ficam ocultos com expansão (accordion)
+________________________________________
+12️⃣ CONFIGURAÇÕES (ADMIN)
+•	Cadastro e gestão de:
+o	Usuários
+o	Perfis (roles)
+o	Motivos de devolução
+o	Setores
+o	Vendedores
+o	Clientes
+o	Redes
+•	Alterar:
+o	Nome
+o	Email
+o	Senha
+o	Perfil
+•	Excluir usuários
+•	Logs de alterações
+________________________________________
+13️⃣ MASTER DATA — SETOR × MOTIVO
+•	Motivo pertence obrigatoriamente a um Setor
+•	Cadastro via Configurações
+•	Usado em:
+o	Filtros dependentes
+o	Gráficos
+o	Alertas
+o	Relatórios
+________________________________________
+14️⃣ ALERTAS E INSIGHTS
+Operacionais
+•	Produto acima da média
+•	Cliente reincidente
+•	SLA estourado
+•	Região fora do padrão
+Financeiros
+•	Valor devolvido acima do limite
+•	Impacto na margem
+Inteligentes
+•	Anomalias
+•	Comparação com histórico
+•	Crescimento inesperado
+________________________________________
+15️⃣ DIFERENCIAIS DE UX
+•	Filtros persistentes (URL / localStorage)
+•	Skeleton loading
+•	Mensagens inteligentes
+•	Dashboards responsivos
+•	Navegação por role
+•	Performance otimizada
+________________________________________
+✅ RESULTADO ESPERADO
+Um aplicativo web corporativo, escalável, seguro e analítico, com:
+•	Dados confiáveis
+•	Visão executiva e operacional
+•	Processo claro de validação
+•	Forte capacidade de análise e decisão

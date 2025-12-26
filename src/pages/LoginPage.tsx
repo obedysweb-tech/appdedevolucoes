@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,7 +7,6 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { Loader2, AlertCircle } from "lucide-react";
-import { useAuthStore } from "@/lib/store";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export function LoginPage() {
@@ -17,9 +16,18 @@ export function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const { setUser } = useAuthStore();
-  
   const navigate = useNavigate();
+  
+  // Verificar se o usuário já está logado e redirecionar
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        navigate("/dashboard");
+      }
+    };
+    checkSession();
+  }, [navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,26 +47,15 @@ export function LoginPage() {
         if (error) throw error;
         
         if (data.user) {
-             const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', data.user.id)
-              .single();
-              
-             if (profile) {
-                 setUser(profile);
-                 toast.success(`Bem-vindo, ${profile.name}!`);
-                 navigate("/dashboard");
-             } else {
-                 // Fallback se o perfil não existir (mas login auth funcionou)
-                 setUser({
-                    id: data.user.id,
-                    email: data.user.email!,
-                    name: data.user.user_metadata?.name || 'Usuário',
-                    role: 'COMERCIAL'
-                 });
-                 navigate("/dashboard");
-             }
+             console.log('✅ Login bem-sucedido!');
+             toast.success('Login realizado com sucesso!');
+             setLoading(false);
+             
+             // Aguardar um pouco para o onAuthStateChange atualizar o estado
+             // Depois navegar - o ProtectedRoute vai verificar se o usuário está setado
+             setTimeout(() => {
+               navigate("/dashboard");
+             }, 300);
         }
       } else {
         // --- CADASTRO (SIGN UP) ---

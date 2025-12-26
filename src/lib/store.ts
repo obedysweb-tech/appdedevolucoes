@@ -6,6 +6,7 @@ interface AuthState {
   setUser: (user: User | null) => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
+  logout: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -13,6 +14,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
   setUser: (user) => set({ user }),
   setIsLoading: (isLoading) => set({ isLoading }),
+  logout: async () => {
+    const { supabase } = await import('@/lib/supabase');
+    await supabase.auth.signOut();
+    set({ user: null, isLoading: false });
+  },
 }));
 
 interface FilterState {
