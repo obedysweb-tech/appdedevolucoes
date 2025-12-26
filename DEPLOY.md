@@ -1,6 +1,6 @@
 # Guia de Deploy - Gestão de Devoluções
 
-Este guia fornece instruções passo a passo para fazer o deploy do aplicativo na Vercel.
+Este guia fornece instruções passo a passo para fazer o deploy do aplicativo na **Vercel** ou **Netlify**.
 
 ## 📋 Pré-requisitos
 
@@ -18,6 +18,8 @@ Este guia fornece instruções passo a passo para fazer o deploy do aplicativo n
 Certifique-se de que os seguintes arquivos estão configurados:
 
 - ✅ `vercel.json` - Configuração do Vercel
+- ✅ `netlify.toml` - Configuração do Netlify
+- ✅ `public/_redirects` - Redirects para SPA (Netlify)
 - ✅ `vite.config.ts` - Configuração do Vite
 - ✅ `package.json` - Scripts e dependências
 - ✅ `public/manifest.json` - Manifesto PWA
@@ -206,14 +208,142 @@ Antes de considerar o deploy completo, verifique:
 - [ ] Dashboard carrega dados
 - [ ] Gráficos renderizam corretamente
 
+## 🌐 Deploy na Netlify
+
+### Pré-requisitos
+
+- Conta no [Netlify](https://netlify.com)
+- Repositório Git conectado (GitHub, GitLab ou Bitbucket)
+
+### Passo a Passo
+
+#### 1. Preparação
+
+O projeto já está configurado com:
+- ✅ `netlify.toml` - Configuração do Netlify
+- ✅ `public/_redirects` - Redirects para SPA
+
+#### 2. Importar Projeto
+
+1. Acesse [app.netlify.com](https://app.netlify.com)
+2. Faça login com GitHub, GitLab ou Bitbucket
+3. Clique em **"Add new site"** > **"Import an existing project"**
+4. Selecione o repositório `appdedevolucoes`
+5. Clique em **"Import"**
+
+#### 3. Configurar Build
+
+A Netlify detectará automaticamente o Vite. Verifique as configurações:
+
+- **Build command**: `npm run build`
+- **Publish directory**: `dist`
+- **Base directory**: `.` (raiz)
+
+#### 4. Configurar Variáveis de Ambiente
+
+Na seção **"Site settings"** > **"Environment variables"**, adicione:
+
+```
+VITE_SUPABASE_URL=https://seu-projeto.supabase.co
+VITE_SUPABASE_ANON_KEY=sua_chave_anonima_aqui
+```
+
+**Para cada ambiente** (Production, Deploy previews, Branch deploys):
+- Clique em **"Add a variable"**
+- Digite o nome da variável
+- Digite o valor
+- Selecione os ambientes onde será usada
+- Clique em **"Save"**
+
+#### 5. Deploy
+
+1. Clique em **"Deploy site"**
+2. Aguarde o processo de build (2-5 minutos)
+3. Após o deploy, você receberá uma URL: `https://seu-projeto.netlify.app`
+
+#### 6. Configurar Domínio Personalizado (Opcional)
+
+1. No projeto na Netlify, vá em **"Domain settings"**
+2. Clique em **"Add custom domain"**
+3. Digite seu domínio
+4. Configure os registros DNS conforme instruções
+5. Aguarde a propagação DNS (pode levar até 24h)
+
+#### 7. Configurar HTTPS
+
+A Netlify fornece HTTPS automaticamente via Let's Encrypt. Não é necessário configuração adicional.
+
+### Atualizações Futuras na Netlify
+
+#### Deploy Automático
+
+A Netlify faz deploy automático quando você faz push para:
+- **main/master**: Deploy em produção
+- **outras branches**: Deploy preview
+
+#### Deploy Manual
+
+Para fazer deploy manual:
+
+```bash
+# Instalar Netlify CLI (se ainda não tiver)
+npm i -g netlify-cli
+
+# Fazer login
+netlify login
+
+# Deploy
+netlify deploy --prod
+```
+
+### Troubleshooting Netlify
+
+#### Problema: Build falha
+
+**Solução**:
+- Verifique os logs de build na Netlify
+- Certifique-se de que todas as dependências estão no `package.json`
+- Verifique se não há erros de TypeScript
+
+#### Problema: Rotas não funcionam
+
+**Solução**:
+- Verifique o arquivo `public/_redirects` - deve ter `/* /index.html 200`
+- Verifique o `netlify.toml` - deve ter o redirect configurado
+- Certifique-se de que o React Router está configurado corretamente
+
+#### Problema: PWA não funciona
+
+**Solução**:
+- Verifique se `manifest.json` está em `/public`
+- Verifique se `sw.js` está em `/public`
+- Verifique os headers no `netlify.toml`
+- Certifique-se de que está usando HTTPS
+
+## 📊 Comparação: Vercel vs Netlify
+
+| Recurso | Vercel | Netlify |
+|---------|--------|---------|
+| Deploy Automático | ✅ | ✅ |
+| HTTPS Automático | ✅ | ✅ |
+| Variáveis de Ambiente | ✅ | ✅ |
+| Preview Deploys | ✅ | ✅ |
+| Domínio Personalizado | ✅ | ✅ |
+| Build Time | Rápido | Rápido |
+| Configuração | `vercel.json` | `netlify.toml` |
+
+**Recomendação**: Ambos são excelentes opções. Escolha baseado na sua preferência ou experiência anterior.
+
 ## 📞 Suporte
 
 Se encontrar problemas durante o deploy:
 
-1. Verifique os logs na Vercel
+1. Verifique os logs na plataforma escolhida (Vercel ou Netlify)
 2. Verifique o console do navegador
 3. Verifique as configurações do Supabase
-4. Consulte a documentação da Vercel: https://vercel.com/docs
+4. Consulte a documentação:
+   - Vercel: https://vercel.com/docs
+   - Netlify: https://docs.netlify.com
 
 ---
 
