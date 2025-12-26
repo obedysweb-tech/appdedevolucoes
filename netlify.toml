@@ -9,8 +9,10 @@
 
 # Configurações de build
 [build.environment]
-  NODE_VERSION = "18"
+  NODE_VERSION = "20"
   NPM_FLAGS = "--legacy-peer-deps"
+  # Forçar uso do npm ao invés do yarn
+  NPM_VERSION = "latest"
 
 # Headers de segurança e cache
 [[headers]]

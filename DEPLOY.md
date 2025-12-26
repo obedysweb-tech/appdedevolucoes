@@ -238,6 +238,9 @@ A Netlify detectará automaticamente o Vite. Verifique as configurações:
 - **Build command**: `npm run build`
 - **Publish directory**: `dist`
 - **Base directory**: `.` (raiz)
+- **Node version**: `20` (já configurado no `netlify.toml`)
+
+**⚠️ IMPORTANTE**: O projeto requer Node.js 20+ devido à dependência `@faker-js/faker`. O arquivo `netlify.toml` já está configurado para usar Node.js 20.
 
 #### 4. Configurar Variáveis de Ambiente
 
