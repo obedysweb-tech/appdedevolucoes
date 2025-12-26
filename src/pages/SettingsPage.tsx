@@ -22,7 +22,6 @@ export function SettingsPage() {
   const [clientes, setClientes] = useState<any[]>([]);
   const [vendedores, setVendedores] = useState<string[]>([]);
   const [newVendedor, setNewVendedor] = useState("");
-  const [loading, setLoading] = useState(true);
 
   // Form states
   const [newSector, setNewSector] = useState("");
@@ -56,7 +55,6 @@ export function SettingsPage() {
   }, []);
 
   const fetchData = async () => {
-    setLoading(true);
     const [sectorsData, reasonsData, usersData, clientesData, devolucoesData] = await Promise.all([
       supabase.from('setores').select('*').order('nome'),
       supabase.from('motivos_devolucao').select('*, setor:setores(nome)').order('nome'),
@@ -87,7 +85,6 @@ export function SettingsPage() {
       setVendedores(Array.from(vendedoresSet).sort());
     }
     
-    setLoading(false);
   };
 
   const handleAddSector = async () => {

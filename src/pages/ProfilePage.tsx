@@ -134,8 +134,19 @@ export function ProfilePage() {
                   valor: data.value
               }))
               .sort((a, b) => {
-                  const dateA = new Date(a.name.split(' ')[1] + '-' + (ptBR.localize?.month?.parse(a.name.split(' ')[0]) || 0));
-                  const dateB = new Date(b.name.split(' ')[1] + '-' + (ptBR.localize?.month?.parse(b.name.split(' ')[0]) || 0));
+                  // Ordenar por data (assumindo formato "Mês Ano")
+                  const monthMap: Record<string, number> = {
+                      'jan': 1, 'fev': 2, 'mar': 3, 'abr': 4, 'mai': 5, 'jun': 6,
+                      'jul': 7, 'ago': 8, 'set': 9, 'out': 10, 'nov': 11, 'dez': 12
+                  };
+                  const partsA = a.name.toLowerCase().split(' ');
+                  const partsB = b.name.toLowerCase().split(' ');
+                  const monthA = monthMap[partsA[0]?.substring(0, 3) || ''] || 0;
+                  const monthB = monthMap[partsB[0]?.substring(0, 3) || ''] || 0;
+                  const yearA = parseInt(partsA[1] || '0');
+                  const yearB = parseInt(partsB[1] || '0');
+                  const dateA = new Date(yearA, monthA - 1);
+                  const dateB = new Date(yearB, monthB - 1);
                   return dateA.getTime() - dateB.getTime();
               });
           
@@ -313,10 +324,10 @@ export function ProfilePage() {
                                                     border: '1px solid var(--border)',
                                                     color: 'var(--foreground)'
                                                 }}
-                                                formatter={(value: number | undefined, name: string) => {
+                                                formatter={(value: number | undefined, name?: string) => {
                                                     if (name === 'quantidade') return [value, 'Quantidade'];
                                                     if (name === 'valor') return [`R$ ${(value || 0).toLocaleString('pt-BR')}`, 'Valor'];
-                                                    return [value, name];
+                                                    return [value, name || ''];
                                                 }}
                                             />
                                             <Legend />

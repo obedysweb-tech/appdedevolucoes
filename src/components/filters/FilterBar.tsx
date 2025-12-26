@@ -7,7 +7,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { CalendarIcon, FilterX, Search, Layers } from "lucide-react";
 import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabase";
@@ -20,7 +19,6 @@ export function FilterBar() {
   const [motivos, setMotivos] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
   const [vendedores, setVendedores] = useState<string[]>([]);
-  const [resultados, setResultados] = useState<string[]>(['PENDENTE VALIDAÇÃO', 'VALIDADA', 'LANÇADA', 'ANULADA/CANCELADA']);
 
   useEffect(() => {
       // Fetch dados para filtros

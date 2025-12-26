@@ -26,10 +26,12 @@ export function Sidebar({ className, isOpen = false, onClose }: SidebarProps) {
   
   const toggleTheme = () => {
       const html = document.querySelector('html');
-      if (html?.classList.contains('dark')) {
-          html.classList.remove('dark');
-      } else {
-          html.classList.add('dark');
+      if (html) {
+          if (html.classList.contains('dark')) {
+              html.classList.remove('dark');
+          } else {
+              html.classList.add('dark');
+          }
       }
   };
 

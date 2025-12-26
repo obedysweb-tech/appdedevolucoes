@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabase";
 import { useFilterStore, useAuthStore } from "@/lib/store";
 import { getDateRangeFromPeriod } from "@/lib/dateUtils";
-import { Loader2, FileSpreadsheet, FileText, Download, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Loader2, FileSpreadsheet, FileText, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import * as XLSX from 'xlsx';
@@ -30,7 +30,7 @@ const RESULTADO_ORDEM: Record<string, number> = {
   'ANULADA/CANCELADA': 5
 };
 
-type SortField = 'data_emissao' | 'numero' | 'nome_cliente' | 'cidade_origem' | 'vendedor' | 'motivo_nome' | 'valor_total_nota' | 'dias' | 'prazo' | 'resultado';
+type SortField = 'data_emissao' | 'numero' | 'nome_cliente' | 'cidade_origem' | 'vendedor' | 'motivo' | 'motivo_nome' | 'valor_total_nota' | 'dias' | 'prazo' | 'resultado';
 type SortDirection = 'asc' | 'desc' | null;
 
 export function ReportsPage() {
