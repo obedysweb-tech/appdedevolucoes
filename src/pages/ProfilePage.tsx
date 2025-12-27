@@ -1,5 +1,6 @@
 import { useAuthStore, useFilterStore } from "@/lib/store";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -212,7 +213,10 @@ export function ProfilePage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Meu Perfil</h1>
+      <PageHeader 
+        title="Meu Perfil" 
+        description="Visualize suas métricas pessoais, histórico de validações e gerencie suas configurações de segurança."
+      />
       
       {/* Filtros Globais agora presentes no Perfil */}
       <FilterBar />

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -492,7 +493,10 @@ export function SyncPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Sincronização</h1>
+      <PageHeader 
+        title="Sincronização" 
+        description="Importe arquivos CSV ou XLSX para sincronizar devoluções. O sistema busca automaticamente dados de clientes e filiais."
+      />
       
       <div className="grid gap-6 md:grid-cols-1">
         <Card>

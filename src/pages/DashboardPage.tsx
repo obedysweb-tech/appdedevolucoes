@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { KPICard } from "@/components/dashboard/KPICard";
 import { FilterBar } from "@/components/filters/FilterBar";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { useFilterStore, useAuthStore } from "@/lib/store";
 import { getDateRangeFromPeriod } from "@/lib/dateUtils";
 import { supabase } from "@/lib/supabase";
@@ -13,7 +14,8 @@ import {
   Loader2,
   RefreshCw,
   MapPin,
-  PackageX
+  PackageX,
+  XCircle
 } from "lucide-react";
 import { 
   AreaChart, 
@@ -41,6 +43,50 @@ import { Button } from "@/components/ui/button";
 const COLORS_LIGHT = ['#18442b', '#2e6b4d', '#4a9170', '#70b896', '#9cdebd', '#c4f0da'];
 const COLORS_DARK = ['#3fedef', '#2cb5b8', '#1e8285', '#135457', '#0a2e30', '#000000'];
 
+// Componente customizado para quebrar texto no eixo X
+const CustomXAxisTick = ({ x, y, payload }: any) => {
+  const MAX_CHARS_PER_LINE = 10;
+
+  const words = payload.value.split(" ");
+  let lines: string[] = [];
+  let currentLine = "";
+
+  words.forEach((word: string) => {
+    if ((currentLine + word).length <= MAX_CHARS_PER_LINE) {
+      currentLine += `${word} `;
+    } else {
+      if (currentLine.trim()) {
+        lines.push(currentLine.trim());
+      }
+      currentLine = `${word} `;
+    }
+  });
+
+  if (currentLine.trim()) {
+    lines.push(currentLine.trim());
+  }
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        x={0}
+        y={0}
+        dy={16}
+        textAnchor="middle"
+        fill="currentColor"
+        fontSize={10}
+        fontWeight="bold"
+      >
+        {lines.map((line, index) => (
+          <tspan x="0" dy={index === 0 ? 0 : 14} key={index}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+};
+
 export function DashboardPage() {
   const { filters } = useFilterStore();
   const { user } = useAuthStore();
@@ -57,12 +103,15 @@ export function DashboardPage() {
   const [topVendedores, setTopVendedores] = useState<any[]>([]);
   const [topRedes, setTopRedes] = useState<any[]>([]);
   const [reasonsData, setReasonsData] = useState<any[]>([]);
-  const [geoData, setGeoData] = useState<any[]>([]);
   const [paretoData, setParetoData] = useState<any[]>([]);
   const [heatmapData, setHeatmapData] = useState<any[]>([]);
   const [insights, setInsights] = useState<string[]>([]);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [isDark, setIsDark] = useState(false);
+  const [cancelamentoData, setCancelamentoData] = useState<any[]>([]);
+  const [canceladasData, setCanceladasData] = useState<any[]>([]);
+  const [topProdutos, setTopProdutos] = useState<any[]>([]);
+  const [municipioData, setMunicipioData] = useState<any[]>([]);
 
   useEffect(() => {
     const checkTheme = () => {
@@ -78,22 +127,22 @@ export function DashboardPage() {
 
   useEffect(() => {
     fetchDashboardData();
-  }, [filters]); 
+  }, [filters, user]); 
 
   const fetchDashboardData = async () => {
-    setLoading(true);
-    
-    // Usar vendedor do objeto user (já carregado no App.tsx)
-    const userVendedor = user?.role === 'VENDEDOR' ? user.vendedor : null;
-    
-    // Base query - incluir itens para calcular produtos devolvidos
-    // Remover join com clientes que pode estar causando problemas
-    let query = supabase.from('devolucoes').select(`
-        *,
-        motivos_devolucao(nome),
-        setores(nome),
-        itens:itens_devolucao(quantidade, descricao, motivo_id)
-    `);
+    try {
+      setLoading(true);
+      
+      // Usar vendedor do objeto user (já carregado no App.tsx)
+      const userVendedor = user?.role === 'VENDEDOR' ? user.vendedor : null;
+      
+      // Base query - incluir itens para calcular produtos devolvidos
+      let query = supabase.from('devolucoes').select(`
+          *,
+          motivos_devolucao(nome),
+          setores(nome),
+          itens:itens_devolucao(quantidade, descricao, motivo_id, valor_total_bruto)
+      `);
     
     // Filtrar por vendedor do usuário (apenas se for tipo VENDEDOR)
     if (user && user.role === 'VENDEDOR' && userVendedor) {
@@ -162,7 +211,10 @@ export function DashboardPage() {
         setInsights([]);
         setAlerts([]);
         setReasonsData([]);
-        setGeoData([]);
+        setMunicipioData([]);
+        setCancelamentoData([]);
+        setCanceladasData([]);
+        setTopProdutos([]);
         setLoading(false);
         return;
     }
@@ -220,7 +272,7 @@ export function DashboardPage() {
         const topCust = Object.entries(customerMap)
             .map(([name, value]) => ({ name, value }))
             .sort((a: any, b: any) => b.value - a.value)
-            .slice(0, 5);
+            .slice(0, 10);
         setTopCustomers(topCust);
         
         // Top Vendedores por valor
@@ -279,73 +331,246 @@ export function DashboardPage() {
         }).slice(0, 10);
         setParetoData(pareto);
         
-        // Heatmap: Produto × Motivo (usando valores em R$)
-        const produtoMotivoMap: Record<string, Record<string, number>> = {};
-        devolucoes.forEach(devol => {
+        // Heatmap: Produto × Rede (usando quantidade total devolvida)
+        // Filtrar apenas notas com resultado "PENDENTE VALIDAÇÃO"
+        const devolucoesPendentes = devolucoes.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO');
+        const produtoRedeMap: Record<string, Record<string, number>> = {};
+        devolucoesPendentes.forEach(devol => {
             const itens = devol.itens || [];
+            // Usar rede da devolução para todos os itens
+            const rede = devol.rede || 'Sem rede';
             itens.forEach((item: any) => {
-                const produto = item.descricao || 'Desconhecido';
-                // Buscar motivo do item primeiro, depois da devolução
-                const motivo = item.motivo_item?.nome || devol.motivos_devolucao?.nome || 'Não informado';
-                if (!produtoMotivoMap[produto]) {
-                    produtoMotivoMap[produto] = {};
+                const produtoCompleto = item.descricao || 'Desconhecido';
+                // Pegar apenas as 2 primeiras palavras do produto
+                const palavras = produtoCompleto.split(' ');
+                const produto = palavras.slice(0, 2).join(' ');
+                
+                if (!produtoRedeMap[produto]) {
+                    produtoRedeMap[produto] = {};
                 }
-                // Usar valor total bruto do item ao invés de quantidade
-                const valorItem = Number(item.valor_total_bruto) || 0;
-                produtoMotivoMap[produto][motivo] = (produtoMotivoMap[produto][motivo] || 0) + valorItem;
+                // Usar quantidade devolvida do item e somar com produtos que têm as mesmas 2 primeiras palavras
+                const quantidadeItem = Number(item.quantidade) || 0;
+                produtoRedeMap[produto][rede] = (produtoRedeMap[produto][rede] || 0) + quantidadeItem;
             });
         });
         
-        // Converter para formato de heatmap
-        const produtos = Object.keys(produtoMotivoMap).slice(0, 10);
-        // Coletar todos os motivos únicos dos itens e devoluções
-        const motivosUnicos = new Set<string>();
-        devolucoes.forEach(devol => {
-            const itens = devol.itens || [];
-            itens.forEach((item: any) => {
-                if (item.motivo_item?.nome) {
-                    motivosUnicos.add(item.motivo_item.nome);
-                }
-            });
-            if (devol.motivos_devolucao?.nome) {
-                motivosUnicos.add(devol.motivos_devolucao.nome);
-            }
+        // Converter para formato de heatmap - TODOS OS PRODUTOS AGRUPADOS (sem limite)
+        const produtos = Object.keys(produtoRedeMap);
+        // Coletar todas as redes únicas das devoluções pendentes
+        const redesUnicas = new Set<string>();
+        devolucoesPendentes.forEach(devol => {
+            const rede = devol.rede || 'Sem rede';
+            redesUnicas.add(rede);
         });
-        const motivos = Array.from(motivosUnicos).slice(0, 8);
+        const redes = Array.from(redesUnicas).slice(0, 8);
         
         const heatmap = produtos.map(produto => {
             const row: any = { produto };
-            motivos.forEach(motivo => {
-                row[motivo] = produtoMotivoMap[produto]?.[motivo] || 0;
+            redes.forEach(rede => {
+                row[rede] = produtoRedeMap[produto]?.[rede] || 0;
             });
             return row;
         });
         setHeatmapData(heatmap);
+
+        // 4. Gráfico de Motivos (movido para antes dos insights)
+        const reasonMap = devolucoes.reduce((acc: any, curr) => {
+            const motivo = curr.motivos_devolucao;
+            const reason = (typeof motivo === 'object' && motivo?.nome) ? motivo.nome : (typeof motivo === 'string' ? motivo : 'Não informado');
+            acc[reason] = (acc[reason] || 0) + 1;
+            return acc;
+        }, {});
+
+        const reasonsChart = Object.entries(reasonMap)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a: any, b: any) => b.value - a.value)
+            .slice(0, 5);
+        console.log('📊 Reasons Chart:', reasonsChart);
+        setReasonsData(reasonsChart);
         
-        // Insights automáticos
+        // 5. Dados Geográficos (Municípios) - Alterado de Estado para Município
+        // Buscar município do cliente (emitente) - cidade_origem é do cliente/emitente
+        const municipioMap = devolucoes.reduce((acc: any, curr) => {
+            // Usar cidade_origem que é do cliente/emitente, não cidade_destino que é da filial
+            const municipio = curr.cidade_origem || 'N/A';
+            acc[municipio] = (acc[municipio] || 0) + (Number(curr.valor_total_nota) || 0);
+            return acc;
+        }, {});
+        
+        const municipioChart = Object.entries(municipioMap)
+            .map(([name, value]) => ({ name, value }))
+            .sort((a: any, b: any) => b.value - a.value)
+            .slice(0, 6);
+        console.log('📍 Município Chart:', municipioChart);
+        setMunicipioData(municipioChart);
+        
+        // 6. Gráfico de Notas em Cancelamento (TRATATIVA DE CANCELAMENTO) - com detalhes de cliente e nota fiscal
+        const cancelamentoDetalhes: Record<string, Array<{ cliente: string, nota: string }>> = {};
+        devolucoes
+            .filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO')
+            .forEach((curr) => {
+                const date = new Date(curr.data_emissao || curr.created_at);
+                const day = format(date, 'dd/MM', { locale: ptBR });
+                if (!cancelamentoDetalhes[day]) {
+                    cancelamentoDetalhes[day] = [];
+                }
+                cancelamentoDetalhes[day].push({
+                    cliente: curr.nome_cliente || 'Desconhecido',
+                    nota: curr.numero || '-'
+                });
+            });
+        
+        const cancelamentoChart = Object.keys(cancelamentoDetalhes)
+            .sort((a, b) => {
+                const dateA = new Date(a.split('/').reverse().join('-'));
+                const dateB = new Date(b.split('/').reverse().join('-'));
+                return dateA.getTime() - dateB.getTime();
+            })
+            .map(key => ({
+                name: key,
+                quantidade: cancelamentoDetalhes[key].length,
+                detalhes: cancelamentoDetalhes[key]
+            }));
+        setCancelamentoData(cancelamentoChart);
+        
+        // 6b. Gráfico de Notas Canceladas (ANULADA/CANCELADA) - com detalhes de cliente e nota fiscal
+        const canceladasDetalhes: Record<string, Array<{ cliente: string, nota: string }>> = {};
+        devolucoes
+            .filter(d => d.resultado === 'ANULADA/CANCELADA')
+            .forEach((curr) => {
+                const date = new Date(curr.data_emissao || curr.created_at);
+                const day = format(date, 'dd/MM', { locale: ptBR });
+                if (!canceladasDetalhes[day]) {
+                    canceladasDetalhes[day] = [];
+                }
+                canceladasDetalhes[day].push({
+                    cliente: curr.nome_cliente || 'Desconhecido',
+                    nota: curr.numero || '-'
+                });
+            });
+        
+        const canceladasChart = Object.keys(canceladasDetalhes)
+            .sort((a, b) => {
+                const dateA = new Date(a.split('/').reverse().join('-'));
+                const dateB = new Date(b.split('/').reverse().join('-'));
+                return dateA.getTime() - dateB.getTime();
+            })
+            .map(key => ({
+                name: key,
+                quantidade: canceladasDetalhes[key].length,
+                detalhes: canceladasDetalhes[key]
+            }));
+        setCanceladasData(canceladasChart);
+        
+        // 7. Produtos Críticos - Top 10 produtos mais devolvidos (soma de quantidade)
+        const produtosMap: Record<string, number> = {};
+        devolucoes.forEach(devol => {
+            const itens = devol.itens || [];
+            itens.forEach((item: any) => {
+                const produto = item.descricao || 'Desconhecido';
+                const quantidade = Number(item.quantidade) || 0;
+                produtosMap[produto] = (produtosMap[produto] || 0) + quantidade;
+            });
+        });
+        
+        const topProdutosList = Object.entries(produtosMap)
+            .map(([name, quantidade]) => {
+                // Pegar apenas as 2 primeiras palavras do nome do produto
+                const palavras = name.split(' ');
+                const nomeReduzido = palavras.slice(0, 2).join(' ');
+                return { name: nomeReduzido, nameFull: name, quantidade };
+            })
+            .sort((a: any, b: any) => b.quantidade - a.quantidade)
+            .slice(0, 10);
+        console.log('🔥 Top Produtos:', topProdutosList);
+        setTopProdutos(topProdutosList);
+        
+        // Insights automáticos - Expandido (movido para depois de calcular todos os dados)
         const insightsList: string[] = [];
         
-        if (topCust.length > 0) {
-            const top1Percent = (topCust[0].value as number / totalValue) * 100;
+        // Insight básico sempre presente
+        if (totalReturns > 0) {
+            insightsList.push(`📊 Total de ${totalReturns} devolução(ões) no período selecionado, totalizando R$ ${totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`);
+        }
+        
+        // Insight 1: Cliente concentrado
+        if (topCust.length > 0 && totalValue > 0) {
+            const top1Percent = ((topCust[0].value as number) / totalValue) * 100;
             if (top1Percent > 20) {
                 insightsList.push(`⚠️ Cliente "${topCust[0].name}" concentra ${top1Percent.toFixed(1)}% do valor total de devoluções.`);
             }
         }
         
+        // Insight 2: Média de produtos
         if (totalProducts > 0 && totalReturns > 0) {
             const avgProductsPerReturn = totalProducts / totalReturns;
             insightsList.push(`📦 Média de ${avgProductsPerReturn.toFixed(1)} produtos por devolução.`);
         }
         
+        // Insight 3: Vendedor líder
         if (topVend.length > 0) {
             insightsList.push(`👤 Vendedor "${topVend[0].name}" lidera em devoluções com R$ ${(topVend[0].value as number).toLocaleString('pt-BR')}.`);
         }
         
-        const pareto80Index = pareto.findIndex(p => p.percentage >= 80);
-        if (pareto80Index >= 0 && pareto80Index < 5) {
-            insightsList.push(`📊 Regra 80/20: ${pareto80Index + 1} clientes concentram 80% do valor de devoluções.`);
+        // Insight 4: Regra 80/20
+        if (pareto.length > 0) {
+            const pareto80Index = pareto.findIndex(p => p.percentage >= 80);
+            if (pareto80Index >= 0 && pareto80Index < 5) {
+                insightsList.push(`📊 Regra 80/20: ${pareto80Index + 1} clientes concentram 80% do valor de devoluções.`);
+            }
         }
         
+        // Insight 5: Produto mais devolvido
+        if (topProdutosList.length > 0) {
+            const topProduto = topProdutosList[0];
+            insightsList.push(`🔥 Produto "${topProduto.name}" é o mais devolvido com ${topProduto.quantidade} unidades.`);
+        }
+        
+        // Insight 6: Taxa de cancelamento
+        const cancelamentoCount = devolucoes.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO' || d.resultado === 'ANULADA/CANCELADA').length;
+        const taxaCancelamento = totalReturns > 0 ? (cancelamentoCount / totalReturns) * 100 : 0;
+        if (taxaCancelamento > 10) {
+            insightsList.push(`🚨 Taxa de cancelamento alta: ${taxaCancelamento.toFixed(1)}% das devoluções estão em cancelamento.`);
+        } else if (cancelamentoCount > 0) {
+            insightsList.push(`ℹ️ ${cancelamentoCount} devolução(ões) em processo de cancelamento.`);
+        }
+        
+        // Insight 7: Motivo mais comum
+        if (reasonsChart.length > 0) {
+            const motivoMaisComum = reasonsChart[0];
+            insightsList.push(`📋 Motivo mais frequente: "${motivoMaisComum.name}" com ${motivoMaisComum.value} ocorrência(s).`);
+        }
+        
+        // Insight 8: Comparação de ticket médio
+        if (avgTicket > 0) {
+            const ticketAlto = devolucoes.filter(d => Number(d.valor_total_nota) > avgTicket * 1.5).length;
+            if (ticketAlto > 0) {
+                insightsList.push(`💰 ${ticketAlto} devolução(ões) com valor acima de 150% do ticket médio.`);
+            }
+        }
+        
+        // Insight 9: Rede mais problemática
+        if (topRed.length > 0 && totalValue > 0) {
+            const redePercent = ((topRed[0].value as number) / totalValue) * 100;
+            if (redePercent > 15) {
+                insightsList.push(`🏪 Rede "${topRed[0].name}" representa ${redePercent.toFixed(1)}% do valor devolvido.`);
+            }
+        }
+        
+        // Insight 10: Tendência temporal
+        if (chart.length >= 2) {
+            const ultimoValor = chart[chart.length - 1].value;
+            const penultimoValor = chart[chart.length - 2].value;
+            if (penultimoValor > 0) {
+                const variacao = ((ultimoValor - penultimoValor) / penultimoValor) * 100;
+                if (Math.abs(variacao) > 20) {
+                    const tendencia = variacao > 0 ? 'aumento' : 'redução';
+                    insightsList.push(`📈 ${tendencia.charAt(0).toUpperCase() + tendencia.slice(1)} de ${Math.abs(variacao).toFixed(1)}% no valor devolvido comparado ao período anterior.`);
+                }
+            }
+        }
+        
+        console.log('💡 Insights:', insightsList);
         setInsights(insightsList);
         
         // Alertas automáticos
@@ -368,35 +593,13 @@ export function DashboardPage() {
         }
         
         setAlerts(alertsList.slice(0, 5)); // Limitar a 5 alertas
-
-        // 4. Gráfico de Motivos
-        const reasonMap = devolucoes.reduce((acc: any, curr) => {
-            const motivo = curr.motivos_devolucao;
-            const reason = (typeof motivo === 'object' && motivo?.nome) ? motivo.nome : (typeof motivo === 'string' ? motivo : 'Não informado');
-            acc[reason] = (acc[reason] || 0) + 1;
-            return acc;
-        }, {});
-
-        const reasonsChart = Object.entries(reasonMap)
-            .map(([name, value]) => ({ name, value }))
-            .sort((a: any, b: any) => b.value - a.value)
-            .slice(0, 5);
-        setReasonsData(reasonsChart);
-
-        // 5. Dados Geográficos (Estados)
-        const geoMap = devolucoes.reduce((acc: any, curr) => {
-            const uf = curr.uf_origem || 'N/A';
-            acc[uf] = (acc[uf] || 0) + (Number(curr.valor_total_nota) || 0);
-            return acc;
-        }, {});
-        
-        const geoChart = Object.entries(geoMap)
-            .map(([name, value]) => ({ name, value }))
-            .sort((a: any, b: any) => b.value - a.value)
-            .slice(0, 6);
-        setGeoData(geoChart);
+      }
+    } catch (error: any) {
+      console.error('❌ Erro ao processar dados do Dashboard:', error);
+      toast.error('Erro ao processar dados: ' + (error.message || 'Erro desconhecido'));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   if (loading) {
@@ -410,8 +613,11 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <Button variant="outline" size="sm" onClick={fetchDashboardData}>
+        <PageHeader 
+          title="Dashboard" 
+          description="Visão geral das devoluções com KPIs, gráficos e insights automáticos para análise estratégica."
+        />
+        <Button variant="outline" size="sm" onClick={fetchDashboardData} className="ml-4">
             <RefreshCw className="mr-2 h-4 w-4" />
             Atualizar
         </Button>
@@ -477,7 +683,7 @@ export function DashboardPage() {
       </div>
 
       {/* Main Charts Row */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+      <div className="grid gap-4 md:grid-cols-2">
         <Card className="col-span-4">
           <CardHeader>
             <CardTitle>Evolução no Tempo</CardTitle>
@@ -492,14 +698,20 @@ export function DashboardPage() {
                     </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
-                <XAxis dataKey="name" className="text-xs" />
-                <YAxis className="text-xs" tickFormatter={(value) => `R$${value}`} />
+                <XAxis 
+                  dataKey="name" 
+                  height={60}
+                  tick={<CustomXAxisTick />}
+                />
+                <YAxis className="text-[6px] font-size-6px font-bold" tickFormatter={(value) => `R$${value}`} />
                 <Tooltip 
                     contentStyle={{ 
                         backgroundColor: 'var(--card)', 
                         borderRadius: '8px', 
                         border: '1px solid var(--border)',
-                        color: 'var(--foreground)'
+                        color: 'var(--foreground)',
+                        fontSize: '11px',
+                        fontWeight: 'bold'
                     }}
                     formatter={(value: number | undefined) => [`R$ ${(value || 0).toFixed(2)}`, 'Valor']}
                 />
@@ -515,7 +727,7 @@ export function DashboardPage() {
           </CardContent>
         </Card>
         
-        <Card className="col-span-3">
+        <Card className="col-span-4">
           <CardHeader>
             <CardTitle>Top Clientes (Valor)</CardTitle>
           </CardHeader>
@@ -525,18 +737,18 @@ export function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
                 <XAxis 
                   dataKey="name" 
-                  className="text-xs"
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
+                  height={60}
+                  tick={<CustomXAxisTick />}
                 />
-                <YAxis className="text-xs" tickFormatter={(value) => `R$${value}`} />
+                <YAxis className="text-[6px] font-bold" tickFormatter={(value) => `R$${value}`} />
                 <Tooltip 
                   contentStyle={{ 
                     backgroundColor: 'var(--card)', 
                     borderRadius: '8px', 
                     border: '1px solid var(--border)',
-                    color: 'var(--foreground)'
+                    color: 'var(--foreground)',
+                    fontSize: '11px',
+                    fontWeight: 'bold'
                   }}
                   formatter={(value: number | undefined) => [`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor']}
                 />
@@ -559,18 +771,18 @@ export function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
                 <XAxis 
                   dataKey="name" 
-                  className="text-xs"
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
+                  height={60}
+                  tick={<CustomXAxisTick />}
                 />
-                <YAxis className="text-xs" tickFormatter={(value) => `R$${value}`} />
+                <YAxis className="text-[10px] font-bold" tickFormatter={(value) => `R$${value}`} />
                 <Tooltip 
                   contentStyle={{ 
                     backgroundColor: 'var(--card)', 
                     borderRadius: '8px', 
                     border: '1px solid var(--border)',
-                    color: 'var(--foreground)'
+                    color: 'var(--foreground)',
+                    fontSize: '11px',
+                    fontWeight: 'bold'
                   }}
                   formatter={(value: number | undefined) => [`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor']}
                 />
@@ -590,18 +802,18 @@ export function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
                 <XAxis 
                   dataKey="name" 
-                  className="text-xs"
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
+                  height={60}
+                  tick={<CustomXAxisTick />}
                 />
-                <YAxis className="text-xs" tickFormatter={(value) => `R$${value}`} />
+                <YAxis className="text-[10px] font-bold" tickFormatter={(value) => `R$${value}`} />
                 <Tooltip 
                   contentStyle={{ 
                     backgroundColor: 'var(--card)', 
                     borderRadius: '8px', 
                     border: '1px solid var(--border)',
-                    color: 'var(--foreground)'
+                    color: 'var(--foreground)',
+                    fontSize: '11px',
+                    fontWeight: 'bold'
                   }}
                   formatter={(value: number | undefined) => [`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor']}
                 />
@@ -624,19 +836,19 @@ export function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
                 <XAxis 
                   dataKey="name" 
-                  className="text-xs"
-                  angle={-45}
-                  textAnchor="end"
-                  height={80}
+                  height={60}
+                  tick={<CustomXAxisTick />}
                 />
-                <YAxis yAxisId="left" className="text-xs" tickFormatter={(value) => `R$${value}`} />
-                <YAxis yAxisId="right" orientation="right" className="text-xs" tickFormatter={(value) => `${value}%`} />
+                <YAxis yAxisId="left" className="text-[10px] font-bold" tickFormatter={(value) => `R$${value}`} />
+                <YAxis yAxisId="right" orientation="right" className="text-[10px] font-bold" tickFormatter={(value) => `${value}%`} />
                 <Tooltip 
                   contentStyle={{ 
                     backgroundColor: 'var(--card)', 
                     borderRadius: '8px', 
                     border: '1px solid var(--border)',
-                    color: 'var(--foreground)'
+                    color: 'var(--foreground)',
+                    fontSize: '11px',
+                    fontWeight: 'bold'
                   }}
                   formatter={(value: number | undefined, name: string | undefined) => {
                     const val = value || 0;
@@ -680,7 +892,7 @@ export function DashboardPage() {
       {heatmapData.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Heatmap: Produto × Motivo</CardTitle>
+            <CardTitle>Heatmap: Produto × Rede</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -688,8 +900,8 @@ export function DashboardPage() {
                 <thead>
                   <tr>
                     <th className="border p-2 text-left bg-muted text-xs">Produto</th>
-                    {heatmapData[0] && Object.keys(heatmapData[0]).filter(k => k !== 'produto').map(motivo => (
-                      <th key={motivo} className="border p-2 bg-muted text-xs">{motivo.length > 15 ? motivo.substring(0, 15) + '...' : motivo}</th>
+                    {heatmapData[0] && Object.keys(heatmapData[0]).filter(k => k !== 'produto').map(rede => (
+                      <th key={rede} className="border p-2 bg-muted text-xs">{rede.length > 15 ? rede.substring(0, 15) + '...' : rede}</th>
                     ))}
                   </tr>
                 </thead>
@@ -697,21 +909,21 @@ export function DashboardPage() {
                   {heatmapData.map((row, idx) => (
                     <tr key={idx}>
                       <td className="border p-2 font-medium text-xs">{row.produto.length > 20 ? row.produto.substring(0, 20) + '...' : row.produto}</td>
-                      {Object.keys(row).filter(k => k !== 'produto').map(motivo => {
-                        const value = row[motivo] || 0;
+                      {Object.keys(row).filter(k => k !== 'produto').map(rede => {
+                        const value = row[rede] || 0;
                         const maxValue = Math.max(...heatmapData.map(r => Math.max(...Object.keys(r).filter(k => k !== 'produto').map(k => r[k] || 0))));
                         const intensity = maxValue > 0 ? (value / maxValue) * 100 : 0;
                         return (
                           <td 
-                            key={motivo} 
+                            key={rede} 
                             className="border p-2 text-center text-xs"
                             style={{ 
                               backgroundColor: intensity > 0 ? `rgba(7, 62, 41, ${intensity / 100})` : 'transparent',
                               color: intensity > 50 ? 'white' : 'inherit'
                             }}
-                            title={`R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
+                            title={`${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} unidades`}
                           >
-                            {value > 0 ? `R$ ${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-'}
+                            {value > 0 ? `${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} qtde` : '-'}
                           </td>
                         );
                       })}
@@ -724,6 +936,109 @@ export function DashboardPage() {
         </Card>
       )}
 
+      {/* Gráficos de Cancelamento e Canceladas */}
+      {(cancelamentoData.length > 0 || canceladasData.length > 0) && (
+        <div className="grid gap-4 md:grid-cols-2">
+          {/* Gráfico de Notas em Cancelamento */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <XCircle className="h-5 w-5 text-orange-500" />
+                Notas em Cancelamento
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {cancelamentoData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={cancelamentoData}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
+                    <XAxis 
+                      dataKey="name" 
+                      height={60}
+                      tick={<CustomXAxisTick />}
+                    />
+                    <YAxis className="text-[10px] font-bold" />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'var(--card)', 
+                        borderRadius: '8px', 
+                        border: '1px solid var(--border)',
+                        color: 'var(--foreground)',
+                        fontSize: '11px',
+                        fontWeight: 'bold'
+                      }}
+                      formatter={(value: number | undefined, _name: string | undefined, props: any) => {
+                        const detalhes = props.payload?.detalhes || [];
+                        const detalhesTexto = detalhes.map((d: any) => `${d.cliente} - NF: ${d.nota}`).join('\n');
+                        return [
+                          `${value || 0} nota(s)\n\n${detalhesTexto}`,
+                          'Detalhes'
+                        ];
+                      }}
+                    />
+                    <Bar dataKey="quantidade" fill={CHART_COLORS[0]} radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground text-center p-4">
+                  <XCircle className="h-10 w-10 mb-2 opacity-20" />
+                  <p className="text-sm">Nenhuma nota em cancelamento encontrada.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+          
+          {/* Gráfico de Notas Canceladas */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <XCircle className="h-5 w-5 text-red-500" />
+                Notas Canceladas
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {canceladasData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={canceladasData}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
+                    <XAxis 
+                      dataKey="name" 
+                      height={60}
+                      tick={<CustomXAxisTick />}
+                    />
+                    <YAxis className="text-[10px] font-bold" />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'var(--card)', 
+                        borderRadius: '8px', 
+                        border: '1px solid var(--border)',
+                        color: 'var(--foreground)',
+                        fontSize: '11px',
+                        fontWeight: 'bold'
+                      }}
+                      formatter={(value: number | undefined, _name: string | undefined, props: any) => {
+                        const detalhes = props.payload?.detalhes || [];
+                        const detalhesTexto = detalhes.map((d: any) => `${d.cliente} - NF: ${d.nota}`).join('\n');
+                        return [
+                          `${value || 0} nota(s)\n\n${detalhesTexto}`,
+                          'Detalhes'
+                        ];
+                      }}
+                    />
+                    <Bar dataKey="quantidade" fill={CHART_COLORS[1]} radius={[8, 8, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground text-center p-4">
+                  <XCircle className="h-10 w-10 mb-2 opacity-20" />
+                  <p className="text-sm">Nenhuma nota cancelada encontrada.</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Secondary Charts Row */}
       <div className="grid gap-4 md:grid-cols-3">
           {/* Reasons Chart */}
@@ -732,22 +1047,23 @@ export function DashboardPage() {
                   <CardTitle className="text-base">Principais Motivos</CardTitle>
               </CardHeader>
               <CardContent>
-                  <div className="h-[250px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                            <Pie
-                                data={reasonsData}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={60}
-                                outerRadius={80}
-                                paddingAngle={5}
-                                dataKey="value"
-                            >
-                                {reasonsData.map((_, index) => (
-                                    <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                                ))}
-                            </Pie>
+                  {reasonsData.length > 0 ? (
+                      <div className="h-[250px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie
+                                    data={reasonsData}
+                                    cx="50%"
+                                    cy="50%"
+                                    innerRadius={60}
+                                    outerRadius={80}
+                                    paddingAngle={5}
+                                    dataKey="value"
+                                >
+                                    {reasonsData.map((_, index) => (
+                                        <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                                    ))}
+                                </Pie>
                             <Tooltip 
                                 contentStyle={{ 
                                     backgroundColor: 'var(--card)', 
@@ -755,53 +1071,92 @@ export function DashboardPage() {
                                     border: '1px solid var(--border)' 
                                 }}
                             />
-                            <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                        </PieChart>
-                    </ResponsiveContainer>
-                  </div>
+                                <Legend 
+                                verticalAlign="bottom" 
+                                height={60}
+                                iconType="circle"
+                                wrapperStyle={{ fontSize: '9px', paddingTop: '8px' }}
+                                formatter={(value) => {
+                                    const maxLength = 20;
+                                    const truncated = value.length > maxLength ? value.substring(0, maxLength) + '...' : value;
+                                    return <span style={{ fontSize: '9px' }}>{truncated}</span>;
+                                }}
+                            />
+                            </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                  ) : (
+                      <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground text-center p-4">
+                          <AlertTriangle className="h-10 w-10 mb-2 opacity-20" />
+                          <p className="text-sm">Nenhum motivo encontrado para o período selecionado.</p>
+                      </div>
+                  )}
               </CardContent>
           </Card>
 
-          {/* Geo Distribution */}
+          {/* Geo Distribution - Alterado para Município */}
           <Card className="col-span-1">
               <CardHeader>
-                  <CardTitle className="text-base">Distribuição por Estado</CardTitle>
+                  <CardTitle className="text-base">Distribuição por Município</CardTitle>
               </CardHeader>
               <CardContent>
                   <div className="space-y-4">
-                      {geoData.map((geo, i) => (
-                          <div key={i} className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                  <MapPin className="h-4 w-4 text-muted-foreground" />
-                                  <span className="text-sm font-medium">{geo.name}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                  <div className="h-2 bg-muted rounded-full w-24 overflow-hidden">
-                                      <div 
-                                        className="h-full bg-primary" 
-                                        style={{ width: `${(geo.value / (stats.totalValue || 1)) * 100}%` }}
-                                      />
+                      {municipioData.length > 0 ? (
+                          municipioData.map((municipio, i) => (
+                              <div key={i} className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                      <MapPin className="h-4 w-4 text-muted-foreground" />
+                                      <span className="text-sm font-medium truncate max-w-[120px]" title={municipio.name}>{municipio.name}</span>
                                   </div>
-                                  <span className="text-xs text-muted-foreground">
-                                      {((geo.value / (stats.totalValue || 1)) * 100).toFixed(0)}%
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                      <div className="h-2 bg-muted rounded-full w-24 overflow-hidden">
+                                          <div 
+                                            className="h-full bg-primary" 
+                                            style={{ width: `${(municipio.value / (stats.totalValue || 1)) * 100}%` }}
+                                          />
+                                      </div>
+                                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                          {((municipio.value / (stats.totalValue || 1)) * 100).toFixed(0)}%
+                                      </span>
+                                  </div>
                               </div>
+                          ))
+                      ) : (
+                          <div className="text-center text-sm text-muted-foreground py-8">
+                              Nenhum dado disponível
                           </div>
-                      ))}
+                      )}
                   </div>
               </CardContent>
           </Card>
 
-          {/* Products Placeholder */}
+          {/* Produtos Críticos - Implementado */}
           <Card className="col-span-1">
               <CardHeader>
                   <CardTitle className="text-base">Produtos Críticos</CardTitle>
               </CardHeader>
               <CardContent>
-                  <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground text-center p-4">
-                      <PackageX className="h-10 w-10 mb-2 opacity-20" />
-                      <p className="text-sm">Importe dados detalhados para visualizar o ranking de produtos.</p>
-                  </div>
+                  {topProdutos.length > 0 ? (
+                      <div className="space-y-3 max-h-[250px] overflow-y-auto">
+                          {topProdutos.map((produto, i) => (
+                              <div key={i} className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
+                                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      <span className="text-xs font-bold text-muted-foreground w-6">{i + 1}º</span>
+                                      <span className="text-sm font-medium truncate" title={produto.nameFull || produto.name}>{produto.name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                      <span className="text-sm font-bold">{produto.quantidade.toFixed(2)}</span>
+                                      <span className="text-xs text-muted-foreground">qtde</span>
+                                  </div>
+                              </div>
+                          ))}
+                      </div>
+                  ) : (
+                      <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground text-center p-4">
+                          <PackageX className="h-10 w-10 mb-2 opacity-20" />
+                          <p className="text-sm">Nenhum produto encontrado para o período selecionado.</p>
+                      </div>
+                  )}
               </CardContent>
           </Card>
       </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -438,7 +439,10 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Configurações</h1>
+      <PageHeader 
+        title="Configurações" 
+        description="Gerencie setores, motivos de devolução, vendedores, clientes e usuários do sistema. Acesso restrito a administradores."
+      />
 
       <Tabs defaultValue="master-data">
         <TabsList>

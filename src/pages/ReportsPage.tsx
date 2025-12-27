@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { FilterBar } from "@/components/filters/FilterBar";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -17,10 +18,11 @@ import { getDateRangeFromPeriod } from "@/lib/dateUtils";
 import { Loader2, FileSpreadsheet, FileText, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { generateReportHTML } from "@/components/reports/ReportHTMLPage";
 
 const RESULTADO_ORDEM: Record<string, number> = {
   'PENDENTE VALIDAÇÃO': 1,
@@ -142,7 +144,9 @@ export function ReportsPage() {
     setLoading(false);
   };
 
-  const generatePDF = () => {
+  // Função antiga de PDF - substituída pelo ReportHTML (mantida para referência)
+  // @ts-ignore - função legada não utilizada
+  const generatePDFLegacy = () => {
     try {
       const doc = new jsPDF('p', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();
@@ -349,6 +353,202 @@ export function ReportsPage() {
 
       yPosition += cardHeight + 20;
 
+      // ========== GRÁFICOS ==========
+      // Calcular dados dos gráficos
+      const topClientesChart = allData.reduce((acc: any, curr) => {
+        const name = curr.nome_cliente || 'Desconhecido';
+        const valor = Number(curr.valor_total_nota) || 0;
+        acc[name] = (acc[name] || 0) + valor;
+        return acc;
+      }, {});
+      const topClientesList = Object.entries(topClientesChart)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a: any, b: any) => b.value - a.value)
+        .slice(0, 5);
+
+      const topVendedoresChart = allData.reduce((acc: any, curr) => {
+        const vendedor = curr.vendedor || 'Desconhecido';
+        const valor = Number(curr.valor_total_nota) || 0;
+        acc[vendedor] = (acc[vendedor] || 0) + valor;
+        return acc;
+      }, {});
+      const topVendedoresList = Object.entries(topVendedoresChart)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a: any, b: any) => b.value - a.value)
+        .slice(0, 5);
+
+      const topRedesChart = allData.reduce((acc: any, curr) => {
+        const rede = curr.rede || 'Sem rede';
+        const valor = Number(curr.valor_total_nota) || 0;
+        acc[rede] = (acc[rede] || 0) + valor;
+        return acc;
+      }, {});
+      const topRedesList = Object.entries(topRedesChart)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a: any, b: any) => b.value - a.value)
+        .slice(0, 5);
+
+      const cancelamentoChart = allData
+        .filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO')
+        .reduce((acc: any, curr) => {
+          const date = new Date(curr.data_emissao || curr.created_at);
+          const day = format(date, 'dd/MM', { locale: ptBR });
+          acc[day] = (acc[day] || 0) + 1;
+          return acc;
+        }, {});
+
+      const municipioChart = allData.reduce((acc: any, curr) => {
+        const municipio = curr.cidade_origem || 'N/A';
+        acc[municipio] = (acc[municipio] || 0) + (Number(curr.valor_total_nota) || 0);
+        return acc;
+      }, {});
+      const municipioList = Object.entries(municipioChart)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a: any, b: any) => b.value - a.value)
+        .slice(0, 6);
+
+      const motivosChart = allData.reduce((acc: any, curr) => {
+        const motivo = curr.motivo_nome || 'Não informado';
+        acc[motivo] = (acc[motivo] || 0) + 1;
+        return acc;
+      }, {});
+      const motivosList = Object.entries(motivosChart)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a: any, b: any) => b.value - a.value)
+        .slice(0, 5);
+
+      const produtosMap: Record<string, number> = {};
+      allData.forEach(devol => {
+        const itens = devol.itens || [];
+        itens.forEach((item: any) => {
+          const produto = item.descricao || 'Desconhecido';
+          const palavras = produto.split(' ');
+          const nomeReduzido = palavras.slice(0, 2).join(' ');
+          const quantidade = Number(item.quantidade) || 0;
+          produtosMap[nomeReduzido] = (produtosMap[nomeReduzido] || 0) + quantidade;
+        });
+      });
+      const topProdutosList = Object.entries(produtosMap)
+        .map(([name, quantidade]) => ({ name, quantidade }))
+        .sort((a: any, b: any) => b.quantidade - a.quantidade)
+        .slice(0, 10);
+
+      // Título da seção de gráficos
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Analises Graficas', 15, yPosition);
+      yPosition += 10;
+
+      // Gráfico 1: Top Clientes
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text('Top 5 Clientes (Valor)', 15, yPosition);
+      yPosition += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      topClientesList.forEach((item: any, index) => {
+        const nome = item.name.length > 40 ? item.name.substring(0, 37) + '...' : item.name;
+        doc.text(`${index + 1}. ${nome}: R$ ${item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 20, yPosition);
+        yPosition += 5;
+      });
+      yPosition += 5;
+
+      // Gráfico 2: Top Vendedores
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Top 5 Vendedores (Valor)', 15, yPosition);
+      yPosition += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      topVendedoresList.forEach((item: any, index) => {
+        const nome = item.name.length > 40 ? item.name.substring(0, 37) + '...' : item.name;
+        doc.text(`${index + 1}. ${nome}: R$ ${item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 20, yPosition);
+        yPosition += 5;
+      });
+      yPosition += 5;
+
+      // Gráfico 3: Top Redes
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Top 5 Redes (Valor)', 15, yPosition);
+      yPosition += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      topRedesList.forEach((item: any, index) => {
+        const nome = item.name.length > 40 ? item.name.substring(0, 37) + '...' : item.name;
+        doc.text(`${index + 1}. ${nome}: R$ ${item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 20, yPosition);
+        yPosition += 5;
+      });
+      yPosition += 5;
+
+      // Gráfico 4: Notas em Cancelamento
+      const cancelamentoEntries = Object.entries(cancelamentoChart).sort((a: any, b: any) => {
+        const dateA = new Date(a[0].split('/').reverse().join('-'));
+        const dateB = new Date(b[0].split('/').reverse().join('-'));
+        return dateA.getTime() - dateB.getTime();
+      }).slice(0, 10);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Notas em Cancelamento', 15, yPosition);
+      yPosition += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      cancelamentoEntries.forEach(([date, count]: any) => {
+        doc.text(`${date}: ${count} nota(s)`, 20, yPosition);
+        yPosition += 5;
+      });
+      yPosition += 5;
+
+      // Gráfico 5: Distribuição por Município
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Distribuição por Município', 15, yPosition);
+      yPosition += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      municipioList.forEach((item: any, index) => {
+        const nome = item.name.length > 40 ? item.name.substring(0, 37) + '...' : item.name;
+        doc.text(`${index + 1}. ${nome}: R$ ${item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 20, yPosition);
+        yPosition += 5;
+      });
+      yPosition += 5;
+
+      // Gráfico 6: Principais Motivos
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Principais Motivos', 15, yPosition);
+      yPosition += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      motivosList.forEach((item: any, index) => {
+        const nome = item.name.length > 40 ? item.name.substring(0, 37) + '...' : item.name;
+        doc.text(`${index + 1}. ${nome}: ${item.value} ocorrência(s)`, 20, yPosition);
+        yPosition += 5;
+      });
+      yPosition += 5;
+
+      // Gráfico 7: Produtos Críticos
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Produtos Críticos (Top 10)', 15, yPosition);
+      yPosition += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      topProdutosList.forEach((item: any, index) => {
+        const nome = item.name.length > 40 ? item.name.substring(0, 37) + '...' : item.name;
+        doc.text(`${index + 1}. ${nome}: ${item.quantidade.toFixed(2)} unidades`, 20, yPosition);
+        yPosition += 5;
+      });
+      yPosition += 10;
+
+      // Nova página se necessário
+      if (yPosition > pageHeight - 50) {
+        doc.addPage();
+        yPosition = 20;
+      }
+
       // ========== TABELAS ==========
       doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
       doc.setFontSize(12);
@@ -517,31 +717,95 @@ export function ReportsPage() {
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(14);
       doc.setFont('helvetica', 'bold');
-      doc.text('Inteligência e Análises', 15, yPosition + 3);
+      doc.text('Inteligencia e Analises', 15, yPosition + 3);
       yPosition += 15;
 
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      
-      // Análise de Recorrência
-      const clientesRecorrentes = allData.reduce((acc: any, item) => {
-        const cliente = item.nome_cliente || 'Desconhecido';
-        acc[cliente] = (acc[cliente] || 0) + 1;
-        return acc;
-      }, {});
-      
-      const topClientes = Object.entries(clientesRecorrentes)
-        .sort(([, a]: any, [, b]: any) => b - a)
-        .slice(0, 5)
-        .map(([cliente, count]: any) => `${cliente}: ${count} devolução(ões)`);
+      // Calcular insights automáticos
+      const totalValue = allData.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
+      const totalReturns = allData.length;
+      const totalProducts = allData.reduce((acc, curr) => {
+        const itens = curr.itens || [];
+        return acc + itens.reduce((sum: number, item: any) => sum + (Number(item.quantidade) || 0), 0);
+      }, 0);
+      const avgTicket = totalReturns > 0 ? totalValue / totalReturns : 0;
+      const avgProductsPerReturn = totalProducts > 0 && totalReturns > 0 ? totalProducts / totalReturns : 0;
 
-      doc.text('Clientes com Maior Recorrência:', 15, yPosition);
-      yPosition += 6;
+      const insightsList: string[] = [];
+      
+      // Insight básico
+      if (totalReturns > 0) {
+        insightsList.push(`Total de ${totalReturns} devolucao(oes) no periodo selecionado, totalizando R$ ${totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`);
+      }
+      
+      // Cliente concentrado
+      if (topClientesList.length > 0 && totalValue > 0) {
+        const top1Percent = ((topClientesList[0].value as number) / totalValue) * 100;
+        if (top1Percent > 20) {
+          insightsList.push(`Cliente "${topClientesList[0].name}" concentra ${top1Percent.toFixed(1)}% do valor total de devolucoes.`);
+        }
+      }
+      
+      // Média de produtos
+      if (avgProductsPerReturn > 0) {
+        insightsList.push(`Media de ${avgProductsPerReturn.toFixed(1)} produtos por devolucao.`);
+      }
+      
+      // Vendedor líder
+      if (topVendedoresList.length > 0) {
+        insightsList.push(`Vendedor "${topVendedoresList[0].name}" lidera em devolucoes com R$ ${(topVendedoresList[0].value as number).toLocaleString('pt-BR')}.`);
+      }
+      
+      // Produto mais devolvido
+      if (topProdutosList.length > 0) {
+        insightsList.push(`Produto "${topProdutosList[0].name}" e o mais devolvido com ${topProdutosList[0].quantidade.toFixed(2)} unidades.`);
+      }
+      
+      // Taxa de cancelamento
+      const cancelamentoCount = allData.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO' || d.resultado === 'ANULADA/CANCELADA').length;
+      const taxaCancelamento = totalReturns > 0 ? (cancelamentoCount / totalReturns) * 100 : 0;
+      if (taxaCancelamento > 10) {
+        insightsList.push(`Taxa de cancelamento alta: ${taxaCancelamento.toFixed(1)}% das devolucoes estao em cancelamento.`);
+      } else if (cancelamentoCount > 0) {
+        insightsList.push(`${cancelamentoCount} devolucao(oes) em processo de cancelamento.`);
+      }
+      
+      // Motivo mais comum
+      if (motivosList.length > 0) {
+        insightsList.push(`Motivo mais frequente: "${motivosList[0].name}" com ${motivosList[0].value} ocorrencia(s).`);
+      }
+      
+      // Ticket alto
+      if (avgTicket > 0) {
+        const ticketAlto = allData.filter(d => Number(d.valor_total_nota) > avgTicket * 1.5).length;
+        if (ticketAlto > 0) {
+          insightsList.push(`${ticketAlto} devolucao(oes) com valor acima de 150% do ticket medio.`);
+        }
+      }
+      
+      // Rede mais problemática
+      if (topRedesList.length > 0 && totalValue > 0) {
+        const redePercent = ((topRedesList[0].value as number) / totalValue) * 100;
+        if (redePercent > 15) {
+          insightsList.push(`Rede "${topRedesList[0].name}" representa ${redePercent.toFixed(1)}% do valor devolvido.`);
+        }
+      }
+
+      // Exibir Insights Automáticos
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Insights Automaticos:', 15, yPosition);
+      yPosition += 7;
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
-      topClientes.forEach((text, index) => {
-        doc.text(`${index + 1}. ${text}`, 20, yPosition);
+      doc.setTextColor(0, 0, 0);
+      
+      insightsList.forEach((insight) => {
+        if (yPosition > pageHeight - 20) {
+          doc.addPage();
+          yPosition = 20;
+        }
+        doc.text(insight, 20, yPosition);
         yPosition += 5;
       });
 
@@ -549,60 +813,68 @@ export function ReportsPage() {
 
       // Alertas
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('Alertas e Recomendações:', 15, yPosition);
-      yPosition += 6;
+      doc.setFontSize(11);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text('Alertas e Recomendacoes:', 15, yPosition);
+      yPosition += 7;
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
 
       const alertas: string[] = [];
       if (stats.nfAtraso > 0) {
-        alertas.push(`⚠ ${stats.nfAtraso} nota(s) fiscal(is) em atraso requerem atenção imediata`);
+        alertas.push(`${stats.nfAtraso} nota(s) fiscal(is) em atraso requerem atencao imediata`);
       }
       if (stats.nfPendentes > 10) {
-        alertas.push(`⚠ Alto volume de pendências (${stats.nfPendentes}) - considere revisar processos`);
+        alertas.push(`Alto volume de pendencias (${stats.nfPendentes}) - considere revisar processos`);
       }
       if (stats.totalCancelamento > totalGeral * 0.1) {
-        alertas.push(`⚠ Taxa de cancelamento acima de 10% - investigar causas`);
+        alertas.push(`Taxa de cancelamento acima de 10% - investigar causas`);
       }
       if (allData.length > 0) {
         const mediaDias = allData
           .filter(d => d.dias !== null && d.dias !== undefined)
           .reduce((sum, d) => sum + (d.dias || 0), 0) / allData.filter(d => d.dias !== null && d.dias !== undefined).length;
         if (mediaDias > 30) {
-          alertas.push(`⚠ Tempo médio de processamento alto (${mediaDias.toFixed(1)} dias)`);
+          alertas.push(`Tempo medio de processamento alto (${mediaDias.toFixed(1)} dias)`);
         }
       }
 
       if (alertas.length === 0) {
-        alertas.push('✓ Nenhum alerta crítico identificado');
+        alertas.push('Nenhum alerta critico identificado');
       }
 
       alertas.forEach((alerta) => {
+        if (yPosition > pageHeight - 20) {
+          doc.addPage();
+          yPosition = 20;
+        }
         doc.text(alerta, 20, yPosition);
         yPosition += 5;
       });
 
       yPosition += 5;
 
-      // Histórico e Tendências
+      // Tendências
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('Tendências:', 15, yPosition);
-      yPosition += 6;
+      doc.setFontSize(11);
+      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
+      doc.text('Tendencias:', 15, yPosition);
+      yPosition += 7;
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
 
       const taxaValidacao = allData.length > 0 
         ? ((validadas.length / allData.length) * 100).toFixed(1)
         : '0';
-      const taxaCancelamento = allData.length > 0
+      const taxaCancelamentoFinal = allData.length > 0
         ? ((stats.nfCancelamento / allData.length) * 100).toFixed(1)
         : '0';
 
-      doc.text(`Taxa de Validação: ${taxaValidacao}%`, 20, yPosition);
+      doc.text(`Taxa de Validacao: ${taxaValidacao}%`, 20, yPosition);
       yPosition += 5;
-      doc.text(`Taxa de Cancelamento: ${taxaCancelamento}%`, 20, yPosition);
+      doc.text(`Taxa de Cancelamento: ${taxaCancelamentoFinal}%`, 20, yPosition);
       yPosition += 5;
       doc.text(`Total Processado: ${allData.length} nota(s) fiscal(is)`, 20, yPosition);
 
@@ -739,49 +1011,276 @@ export function ReportsPage() {
     return <ArrowDown className="ml-1 h-4 w-4" />;
   };
 
-  const exportToExcel = () => {
-    if (data.length === 0) {
+  const exportToExcel = async () => {
+    if (allData.length === 0) {
         toast.warning("Sem dados para exportar");
         return;
     }
 
-    // Preparar dados para exportação (usar allData para exportar tudo)
-    const exportData = allData.map(item => ({
-        'Data Emissão': item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy') : '',
-        'Nota Fiscal': item.numero,
-        'Cliente': item.nome_cliente,
-        'CNPJ': item.cnpj_destinatario,
-        'Vendedor': item.vendedor,
-        'Cidade': item.cidade_origem,
-        'UF': item.uf_origem,
-        'Setor': item.setor_nome,
-        'Motivo': item.motivo_nome,
-        'Dias': item.dias !== null && item.dias !== undefined ? item.dias : '-',
-        'Prazo': item.prazo || '-',
-        'Status': item.resultado || 'PENDENTE VALIDAÇÃO',
-        'Valor Total': item.valor_total_nota,
-        'Qtd Itens': item.itens_count
-    }));
+    try {
+      // Buscar dados completos incluindo logs de validação
+      const devolucaoIds = allData.map(d => d.id);
+      let validadoresMap = new Map<string, string>();
+      
+      if (devolucaoIds.length > 0) {
+        const { data: logs } = await supabase
+          .from('logs_validacao')
+          .select(`
+            devolucao_id,
+            status_novo,
+            usuario_id
+          `)
+          .in('devolucao_id', devolucaoIds)
+          .order('created_at', { ascending: false });
+        
+        if (logs) {
+          const userIds = [...new Set(logs.map((l: any) => l.usuario_id).filter(Boolean))];
+          const usuariosMap = new Map<string, string>();
+          
+          if (userIds.length > 0) {
+            const { data: usuarios } = await supabase
+              .from('profiles')
+              .select('id, name')
+              .in('id', userIds);
+            
+            if (usuarios) {
+              usuarios.forEach((u: any) => {
+                usuariosMap.set(u.id, u.name);
+              });
+            }
+          }
+          
+          logs.forEach((log: any) => {
+            const key = `${log.devolucao_id}_${log.status_novo}`;
+            if (!validadoresMap.has(key)) {
+              const nomeUsuario = usuariosMap.get(log.usuario_id);
+              if (nomeUsuario) {
+                validadoresMap.set(key, nomeUsuario);
+              }
+            }
+          });
+        }
+      }
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Relatório Devoluções");
-    XLSX.writeFile(wb, `Relatorio_Devolucoes_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-    toast.success("Relatório Excel gerado com sucesso!");
+      // Preparar dados expandidos (uma linha por produto)
+      const exportData: any[] = [];
+      
+      allData.forEach((item) => {
+        const resultado = item.resultado || 'PENDENTE VALIDAÇÃO';
+        const nomeValidador = resultado !== 'PENDENTE VALIDAÇÃO' 
+          ? (validadoresMap.get(`${item.id}_${resultado}`) || '-')
+          : '-';
+
+        // Se não houver itens, criar uma linha só com dados da nota
+        if (!item.itens || item.itens.length === 0) {
+          exportData.push({
+            'Data Emissão': item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy') : '',
+            'Data Criação': item.created_at ? format(new Date(item.created_at), 'dd/MM/yyyy HH:mm') : '',
+            'Nota Fiscal': item.numero || '',
+            'Série': item.serie || '',
+            'Chave de Acesso': item.chave_acesso || '',
+            'Cliente': item.nome_cliente || '',
+            'CNPJ Cliente': item.cnpj_destinatario || '',
+            'CNPJ Emitente': item.cnpj_emitente || '',
+            'Razão Social Emitente': item.razao_social_emitente || '',
+            'Vendedor': item.vendedor || '',
+            'Rede': item.rede || '',
+            'Cidade Origem': item.cidade_origem || '',
+            'UF Origem': item.uf_origem || '',
+            'Cidade Destino': item.cidade_destino || '',
+            'UF Destino': item.uf_destino || '',
+            'Setor': item.setor_nome || '',
+            'Motivo': item.motivo_nome || '',
+            'Status': resultado,
+            'Validado Por': nomeValidador,
+            'Comentário': item.justificativa || '',
+            'Dias': item.dias !== null && item.dias !== undefined ? item.dias : '',
+            'Prazo': item.prazo || '',
+            'Valor Total Nota': item.valor_total_nota ? Number(item.valor_total_nota).toFixed(2) : '0.00',
+            'Peso Líquido': item.peso_liquido || '',
+            'Sincronização ERP': item.sincronizacao_erp || '',
+            'Finalidade NFe': item.finalidade_nfe || '',
+            'Natureza Operação': item.natureza_operacao || '',
+            'CFOP': item.cfop || '',
+            'Número Item': '',
+            'Descrição Produto': '',
+            'Unidade': '',
+            'Quantidade': '',
+            'Valor Unitário': '',
+            'Valor Total Item': ''
+          });
+        } else {
+          // Criar uma linha por produto
+          item.itens.forEach((produto: any, index: number) => {
+            exportData.push({
+              'Data Emissão': index === 0 ? (item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy') : '') : '',
+              'Data Criação': index === 0 ? (item.created_at ? format(new Date(item.created_at), 'dd/MM/yyyy HH:mm') : '') : '',
+              'Nota Fiscal': index === 0 ? (item.numero || '') : '',
+              'Série': index === 0 ? (item.serie || '') : '',
+              'Chave de Acesso': index === 0 ? (item.chave_acesso || '') : '',
+              'Cliente': index === 0 ? (item.nome_cliente || '') : '',
+              'CNPJ Cliente': index === 0 ? (item.cnpj_destinatario || '') : '',
+              'CNPJ Emitente': index === 0 ? (item.cnpj_emitente || '') : '',
+              'Razão Social Emitente': index === 0 ? (item.razao_social_emitente || '') : '',
+              'Vendedor': index === 0 ? (item.vendedor || '') : '',
+              'Rede': index === 0 ? (item.rede || '') : '',
+              'Cidade Origem': index === 0 ? (item.cidade_origem || '') : '',
+              'UF Origem': index === 0 ? (item.uf_origem || '') : '',
+              'Cidade Destino': index === 0 ? (item.cidade_destino || '') : '',
+              'UF Destino': index === 0 ? (item.uf_destino || '') : '',
+              'Setor': index === 0 ? (item.setor_nome || '') : '',
+              'Motivo': index === 0 ? (item.motivo_nome || '') : '',
+              'Status': index === 0 ? resultado : '',
+              'Validado Por': index === 0 ? nomeValidador : '',
+              'Comentário': index === 0 ? (item.justificativa || '') : '',
+              'Dias': index === 0 ? (item.dias !== null && item.dias !== undefined ? item.dias : '') : '',
+              'Prazo': index === 0 ? (item.prazo || '') : '',
+              'Valor Total Nota': index === 0 ? (item.valor_total_nota ? Number(item.valor_total_nota).toFixed(2) : '0.00') : '',
+              'Peso Líquido': index === 0 ? (item.peso_liquido || '') : '',
+              'Sincronização ERP': index === 0 ? (item.sincronizacao_erp || '') : '',
+              'Finalidade NFe': index === 0 ? (item.finalidade_nfe || '') : '',
+              'Natureza Operação': index === 0 ? (item.natureza_operacao || '') : '',
+              'CFOP': index === 0 ? (item.cfop || '') : '',
+              'Número Item': produto.numero_item || '',
+              'Descrição Produto': produto.descricao || '',
+              'Unidade': produto.unidade || '',
+              'Quantidade': produto.quantidade ? Number(produto.quantidade).toFixed(2) : '',
+              'Valor Unitário': produto.valor_unitario ? Number(produto.valor_unitario).toFixed(2) : '',
+              'Valor Total Item': produto.valor_total_bruto ? Number(produto.valor_total_bruto).toFixed(2) : ''
+            });
+          });
+        }
+      });
+
+      // Criar workbook com ExcelJS
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet('Devoluções');
+      
+      // Definir colunas e seus nomes
+      const columnHeaders = [
+        'Data Emissão', 'Data Criação', 'Nota Fiscal', 'Série', 'Chave de Acesso',
+        'Cliente', 'CNPJ Cliente', 'CNPJ Emitente', 'Razão Social Emitente',
+        'Vendedor', 'Rede', 'Cidade Origem', 'UF Origem', 'Cidade Destino', 'UF Destino',
+        'Setor', 'Motivo', 'Status', 'Validado Por', 'Comentário',
+        'Dias', 'Prazo', 'Valor Total Nota', 'Peso Líquido', 'Sincronização ERP',
+        'Finalidade NFe', 'Natureza Operação', 'CFOP',
+        'Número Item', 'Descrição Produto', 'Unidade', 'Quantidade', 'Valor Unitário', 'Valor Total Item'
+      ];
+      
+      const columnWidths = [
+        12, 18, 12, 8, 45, 30, 18, 18, 30, 20, 20, 20, 5, 20, 5,
+        15, 30, 20, 20, 40, 8, 12, 15, 12, 18, 15, 20, 8,
+        12, 40, 8, 12, 15, 15
+      ];
+      
+      // Adicionar cabeçalho
+      const headerRow = worksheet.addRow(columnHeaders);
+      
+      // Formatar cabeçalho (verde escuro #073e29 com texto branco em negrito)
+      headerRow.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FF073E29' }
+        };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF000000' } },
+          left: { style: 'thin', color: { argb: 'FF000000' } },
+          bottom: { style: 'thin', color: { argb: 'FF000000' } },
+          right: { style: 'thin', color: { argb: 'FF000000' } }
+        };
+      });
+      headerRow.height = 25;
+      
+      // Definir larguras das colunas
+      columnWidths.forEach((width, index) => {
+        worksheet.getColumn(index + 1).width = width;
+      });
+      
+      // Adicionar dados
+      exportData.forEach(row => {
+        const dataRow = worksheet.addRow(columnHeaders.map(header => row[header] || ''));
+        dataRow.eachCell((cell) => {
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+            left: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+            bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+            right: { style: 'thin', color: { argb: 'FFCCCCCC' } }
+          };
+        });
+      });
+      
+      // Formatar coluna de Chave de Acesso como texto
+      const chaveColIndex = columnHeaders.indexOf('Chave de Acesso') + 1;
+      worksheet.getColumn(chaveColIndex).numFmt = '@';
+      
+      // Aplicar filtros automáticos
+      worksheet.autoFilter = {
+        from: { row: 1, column: 1 },
+        to: { row: exportData.length + 1, column: columnHeaders.length }
+      };
+      
+      // Congelar primeira linha
+      worksheet.views = [{ state: 'frozen', ySplit: 1 }];
+      
+      // Gerar buffer e download
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Relatorio_Devolucoes_${format(new Date(), 'yyyy-MM-dd_HHmm')}.xlsx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success("Relatório Excel gerado com sucesso!");
+    } catch (error: any) {
+      console.error('Erro ao gerar Excel:', error);
+      toast.error("Erro ao gerar relatório Excel: " + error.message);
+    }
   };
 
   return (
     <div className="space-y-6">
+      <PageHeader 
+        title="Relatórios" 
+        description="Visualize e exporte relatórios detalhados das devoluções. Gere PDFs e planilhas Excel com todos os dados filtrados."
+      />
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Relatórios</h1>
         <div className="flex gap-2">
             <Button variant="outline" onClick={exportToExcel}>
                 <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" />
                 Exportar Excel
             </Button>
-            <Button variant="outline" onClick={generatePDF}>
+            <Button variant="outline" onClick={() => {
+              const htmlContent = generateReportHTML({
+                data: allData,
+                stats: {
+                  nfPendentes: allData.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO').length,
+                  totalPendente: allData.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO').reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0),
+                  nfCancelamento: allData.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO').length,
+                  totalCancelamento: allData.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO').reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0),
+                  nfAtraso: allData.filter(d => d.prazo === 'EM ATRASO').length,
+                  totalAtraso: allData.filter(d => d.prazo === 'EM ATRASO').reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0),
+                  nfValidadas: allData.filter(d => d.resultado === 'VALIDADA').length,
+                  totalValidadas: allData.filter(d => d.resultado === 'VALIDADA').reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0),
+                  nfLancadas: allData.filter(d => d.resultado === 'LANÇADA').length,
+                  totalLancadas: allData.filter(d => d.resultado === 'LANÇADA').reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0),
+                  totalGeral: allData.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0)
+                },
+                filters
+              });
+              
+              const newWindow = window.open('', '_blank');
+              if (newWindow) {
+                newWindow.document.write(htmlContent);
+                newWindow.document.close();
+              }
+            }}>
                 <FileText className="mr-2 h-4 w-4" />
-                Gerar PDF
+                Gerar Relatório
             </Button>
         </div>
       </div>

@@ -101,16 +101,23 @@ export function LoginPage() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full h-1/2 bg-primary/10 -skew-y-3 origin-top-left z-0"></div>
+      <div className="absolute w-full h-1/2 bg-primary/10 -skew-y-3 origin-top-left z-0"></div>
       
       <Card className="w-full max-w-md z-10 border-t-4 border-t-primary shadow-2xl bg-card">
         <CardHeader className="text-center pb-2">
             <div className="mx-auto mb-6 flex items-center justify-center">
                 <div className="h-32 w-32 relative flex items-center justify-center bg-white rounded-full shadow-md p-3">
                     <img 
-                        src="https://i.ibb.co/b095hpJ/Chat-GPT-Image-25-de-dez-de-2025-15-24-45.png" 
+                        src="https://i.ibb.co/zTq5KR0s/Chat-GPT-Image-26-de-dez-de-2025-19-10-20-removebg-preview.png" 
                         alt="Logo Doce Mel" 
                         className="object-contain h-full w-full"
+                        style={{
+                            backgroundColor: 'unset',
+                            borderColor: 'transparent',
+                            background: 'unset',
+                            borderStyle: 'none',
+                            borderImage: 'none'
+                        }}
                     />
                 </div>
             </div>

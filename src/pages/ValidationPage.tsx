@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { FilterBar } from "@/components/filters/FilterBar";
+import { PageHeader } from "@/components/layout/PageHeader";
 import {
   Table,
   TableBody,
@@ -104,13 +105,57 @@ export function ValidationPage() {
   }, [filters]);
 
   const fetchMotivos = async () => {
-    const { data: motivosData } = await supabase
-      .from('motivos_devolucao')
-      .select('id, nome')
-      .order('nome');
-    
-    if (motivosData) {
-      setMotivos(motivosData);
+    try {
+      // Primeiro busca os motivos
+      const { data: motivosData, error } = await supabase
+        .from('motivos_devolucao')
+        .select('id, nome, sector_id')
+        .order('nome');
+      
+      if (error) {
+        console.error('Erro ao buscar motivos:', error);
+        toast.error('Erro ao carregar motivos');
+        return;
+      }
+      
+      if (!motivosData || motivosData.length === 0) {
+        console.warn('Nenhum motivo encontrado');
+        setMotivos([]);
+        return;
+      }
+      
+      // Busca os setores correspondentes
+      const sectorIds = motivosData
+        .map(m => m.sector_id)
+        .filter(id => id !== null);
+      
+      let setoresMap: Record<string, string> = {};
+      
+      if (sectorIds.length > 0) {
+        const { data: setoresData } = await supabase
+          .from('setores')
+          .select('id, nome')
+          .in('id', sectorIds);
+        
+        if (setoresData) {
+          setoresMap = setoresData.reduce((acc: Record<string, string>, setor: any) => {
+            acc[setor.id] = setor.nome;
+            return acc;
+          }, {});
+        }
+      }
+      
+      // Combina os dados
+      const motivosComSetores = motivosData.map(motivo => ({
+        ...motivo,
+        setores: motivo.sector_id ? { nome: setoresMap[motivo.sector_id] || '' } : null
+      }));
+      
+      console.log('Motivos carregados:', motivosComSetores.length);
+      setMotivos(motivosComSetores);
+    } catch (error) {
+      console.error('Erro ao buscar motivos:', error);
+      toast.error('Erro ao carregar motivos');
     }
   };
 
@@ -204,6 +249,52 @@ export function ValidationPage() {
           }
         }
 
+        // Buscar logs de validação para obter nomes dos usuários validadores
+        const devolucaoIds = devolucoes.map(d => d.id);
+        let validadoresMap = new Map<string, string>();
+        
+        if (devolucaoIds.length > 0) {
+          const { data: logs } = await supabase
+            .from('logs_validacao')
+            .select(`
+              devolucao_id,
+              status_novo,
+              usuario_id
+            `)
+            .in('devolucao_id', devolucaoIds)
+            .order('created_at', { ascending: false });
+          
+          if (logs) {
+            // Buscar nomes dos usuários primeiro
+            const userIds = [...new Set(logs.map((l: any) => l.usuario_id).filter(Boolean))];
+            const usuariosMap = new Map<string, string>();
+            
+            if (userIds.length > 0) {
+              const { data: usuarios } = await supabase
+                .from('profiles')
+                .select('id, name')
+                .in('id', userIds);
+              
+              if (usuarios) {
+                usuarios.forEach((u: any) => {
+                  usuariosMap.set(u.id, u.name);
+                });
+              }
+            }
+            
+            // Criar mapa com o último validador por devolução e status
+            logs.forEach((log: any) => {
+              const key = `${log.devolucao_id}_${log.status_novo}`;
+              if (!validadoresMap.has(key)) {
+                const nomeUsuario = usuariosMap.get(log.usuario_id);
+                if (nomeUsuario) {
+                  validadoresMap.set(key, nomeUsuario);
+                }
+              }
+            });
+          }
+        }
+        
         const formattedData = devolucoes.map((item: any) => {
           const cliente = clientesMap.get(item.cnpj_destinatario);
           
@@ -213,13 +304,23 @@ export function ValidationPage() {
             motivo_nome: prod.motivo_item?.nome || '-'
           }));
           
+          // Buscar nome do validador baseado no resultado atual
+          const resultado = item.resultado || 'PENDENTE VALIDAÇÃO';
+          let nomeValidador = '-';
+          
+          if (resultado !== 'PENDENTE VALIDAÇÃO') {
+            const key = `${item.id}_${resultado}`;
+            nomeValidador = validadoresMap.get(key) || '-';
+          }
+          
           return {
             ...item,
             setor: item.setores?.nome,
             motivo: (typeof item.motivos_devolucao === 'object' && item.motivos_devolucao?.nome) ? item.motivos_devolucao.nome : (typeof item.motivos_devolucao === 'string' ? item.motivos_devolucao : '-'),
             motivo_id: item.motivo_id,
-            resultado: item.resultado || 'PENDENTE VALIDAÇÃO',
+            resultado: resultado,
             itens: itensProcessados,
+            nome_validador: nomeValidador,
             // Preencher com dados do cliente se encontrado
             nome_cliente: cliente?.nome || item.nome_cliente || 'Cliente não encontrado',
             vendedor: cliente?.vendedor || item.vendedor || '-',
@@ -418,7 +519,21 @@ export function ValidationPage() {
         if (logError) console.error("Erro ao salvar log:", logError);
 
         toast.success(`Resultado alterado para: ${novoResultado}`);
-        fetchReturns(); // Atualizar lista
+        
+        // Atualizar apenas o item específico na lista local sem recarregar tudo
+        const updateItem = (item: any) => {
+          if (item.id === id) {
+            return {
+              ...item,
+              resultado: novoResultado,
+              nome_validador: novoResultado !== 'PENDENTE VALIDAÇÃO' ? (user.name || user.email || '-') : '-'
+            };
+          }
+          return item;
+        };
+        
+        setData(prevData => prevData.map(updateItem));
+        setAllData(prevData => prevData.map(updateItem));
 
       } catch (error: any) {
           toast.error("Erro ao processar: " + error.message);
@@ -485,17 +600,21 @@ export function ValidationPage() {
       toast.success("Motivo aplicado a todos os produtos e resultado alterado para VALIDADA!");
       
       // Atualizar apenas o item específico na lista local sem recarregar tudo
-      setData(prevData => prevData.map(item => {
+      const updateItem = (item: any) => {
         if (item.id === id) {
           return {
             ...item,
             motivo_id: motivoId,
             resultado: 'VALIDADA',
+            nome_validador: user.name || user.email || '-',
             itens: item.itens?.map((prod: any) => ({ ...prod, motivo_id: motivoId }))
           };
         }
         return item;
-      }));
+      };
+      
+      setData(prevData => prevData.map(updateItem));
+      setAllData(prevData => prevData.map(updateItem));
 
     } catch (error: any) {
         toast.error("Erro ao processar: " + error.message);
@@ -675,7 +794,8 @@ export function ValidationPage() {
             resultado: todosTemMotivo ? 'VALIDADA' : item.resultado,
             motivo_id: todosTemMotivo && motivoMaisRepetidoLocal ? motivoMaisRepetidoLocal : item.motivo_id,
             motivo: todosTemMotivo && motivoMaisRepetidoLocal ? motivoNome : item.motivo,
-            motivos_devolucao: todosTemMotivo && motivoMaisRepetidoLocal ? motivoMaisRepetidoObj : item.motivos_devolucao
+            motivos_devolucao: todosTemMotivo && motivoMaisRepetidoLocal ? motivoMaisRepetidoObj : item.motivos_devolucao,
+            nome_validador: todosTemMotivo ? (user.name || user.email || '-') : item.nome_validador
           };
         }
         return item;
@@ -732,10 +852,6 @@ export function ValidationPage() {
 
       if (todosTemMotivo) {
         toast.success("Todos os produtos validados! Resultado alterado para VALIDADA.");
-        // Recarregar dados para garantir sincronização completa
-        setTimeout(() => {
-          fetchReturns();
-        }, 500);
       } else {
         toast.success("Motivo do item atualizado!");
       }
@@ -1368,8 +1484,11 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
 
   return (
     <div className="space-y-6">
+      <PageHeader 
+        title="Validação" 
+        description="Valide e gerencie devoluções pendentes. Selecione motivos, altere resultados e adicione comentários para cada devolução."
+      />
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Validação</h1>
         <div className="flex gap-2">
           {isSelectMode && selectedItems.size > 0 && (
             <Button variant="destructive" onClick={handleDeleteMultiple}>
@@ -1484,68 +1603,69 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                 </TableHead>
               )}
               <TableHead className="w-[50px]"></TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('data_emissao')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('data_emissao')}>
                 <div className="flex items-center">
                   Data Emissão
                   <SortIcon field="data_emissao" />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('numero')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('numero')}>
                 <div className="flex items-center">
                   Nota Fiscal
                   <SortIcon field="numero" />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('nome_cliente')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('nome_cliente')}>
                 <div className="flex items-center">
                   Cliente
                   <SortIcon field="nome_cliente" />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('cidade_origem')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('cidade_origem')}>
                 <div className="flex items-center">
                   Origem
                   <SortIcon field="cidade_origem" />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('vendedor')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('vendedor')}>
                 <div className="flex items-center">
                   Vendedor
                   <SortIcon field="vendedor" />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('motivo')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('motivo')}>
                 <div className="flex items-center">
                   Motivo
                   <SortIcon field="motivo" />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('valor_total_nota')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('valor_total_nota')}>
                 <div className="flex items-center">
                   Valor Total
                   <SortIcon field="valor_total_nota" />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('dias')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('dias')}>
                 <div className="flex items-center">
                   Dias
                   <SortIcon field="dias" />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('prazo')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('prazo')}>
                 <div className="flex items-center">
                   Prazo
                   <SortIcon field="prazo" />
                 </div>
               </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('resultado')}>
+              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('resultado')}>
                 <div className="flex items-center">
                   Resultado
                   <SortIcon field="resultado" />
                 </div>
               </TableHead>
-              <TableHead>Comentário</TableHead>
-              <TableHead className="w-[150px]">Ações</TableHead>
+              <TableHead className="text-[10px] px-2">Validado Por</TableHead>
+              <TableHead className="text-[10px] px-2">Comentário</TableHead>
+              <TableHead className="w-[120px] text-[10px] px-2">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1554,7 +1674,7 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
               
               return (
               <TableRow key={item.id} className="group">
-                <TableCell colSpan={isSelectMode ? 14 : 13} className="p-0 border-b">
+                <TableCell colSpan={isSelectMode ? 15 : 14} className="p-0 border-b">
                     <Accordion type="single" collapsible className="w-full">
                         <AccordionItem value={item.id} className="border-b-0">
                             <div className="flex items-center w-full py-2 px-4 hover:bg-muted/50">
@@ -1570,36 +1690,83 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                     )}
                                   </button>
                                 )}
-                                <AccordionTrigger className="w-[50px] py-0 pr-4 hover:no-underline">
-                                    {/* Trigger Icon is automatic */}
-                                </AccordionTrigger>
-                                <div className="flex gap-4 w-full items-center text-sm">
-                                    <div className="w-24">{item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</div>
-                                    <div className="w-24 font-medium">{item.numero}</div>
-                                    <div className="flex-1 truncate" title={item.nome_cliente}>{item.nome_cliente}</div>
-                                    <div className="w-24">{item.cidade_origem}/{item.uf_origem}</div>
-                                    <div className="w-32 truncate" title={item.vendedor}>{item.vendedor}</div>
-                                    <div className="w-48">
-                                      <Select
+                                <div className="flex gap-2 w-full items-center text-[10px]">
+                                    <AccordionTrigger className="w-[50px] py-0 pr-4 hover:no-underline flex-shrink-0">
+                                        {/* Trigger Icon is automatic */}
+                                    </AccordionTrigger>
+                                    <div className="w-20">{item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</div>
+                                    <div className="w-20 font-medium">{item.numero}</div>
+                                    <div className="w-32 truncate" title={item.nome_cliente}>{item.nome_cliente}</div>
+                                    <div className="w-20">{item.cidade_origem}/{item.uf_origem}</div>
+                                    <div className="w-24 truncate" title={item.vendedor}>{item.vendedor}</div>
+                                    <div 
+                                      className="w-40"
+                                      style={{ position: 'relative', zIndex: 10000 }}
+                                      onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                      }}
+                                      onPointerDown={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                      }}
+                                    >
+                                      <select
                                         value={item.motivo_id || ''}
-                                        onValueChange={(value) => handleMotivoChange(item.id, value)}
+                                        onChange={(e) => {
+                                          e.stopPropagation();
+                                          handleMotivoChange(item.id, e.target.value);
+                                        }}
+                                        onMouseDown={(e) => {
+                                          e.stopPropagation();
+                                        }}
+                                        onPointerDown={(e) => {
+                                          e.stopPropagation();
+                                        }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                        }}
+                                        onFocus={(e) => {
+                                          e.stopPropagation();
+                                        }}
+                                        onKeyDown={(e) => {
+                                          e.stopPropagation();
+                                        }}
+                                        className="h-7 w-full px-2 text-[10px] border rounded-md bg-background cursor-pointer"
+                                        style={{ position: 'relative', zIndex: 10001 }}
                                       >
-                                        <SelectTrigger className="h-8 text-xs" onClick={(e) => e.stopPropagation()}>
-                                          <SelectValue placeholder="Selecione..." />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          {motivos.map((motivo) => (
-                                            <SelectItem key={motivo.id} value={motivo.id}>
-                                              {motivo.nome}
-                                            </SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
+                                        <option value="">Selecione... ({motivos.length} motivos)</option>
+                                        {motivos && motivos.length > 0 ? (
+                                          motivos.map((motivo) => {
+                                            const setorNome = (motivo.setores as any)?.nome || '';
+                                            return (
+                                              <option 
+                                                key={motivo.id} 
+                                                value={motivo.id}
+                                              >
+                                                {motivo.nome} {setorNome ? `(${setorNome})` : ''}
+                                              </option>
+                                            );
+                                          })
+                                        ) : (
+                                          <option value="" disabled>Carregando motivos...</option>
+                                        )}
+                                      </select>
                                     </div>
-                                    <div className="w-24 font-bold">R$ {Number(item.valor_total_nota || 0).toFixed(2)}</div>
-                                    <div className="w-16 text-center">{item.dias !== null && item.dias !== undefined ? item.dias : '-'}</div>
-                                    <div className="w-24">
-                                      <span className={`text-xs px-2 py-1 rounded ${
+                                    <div className="w-24 text-[9px] text-muted-foreground">
+                                      {item.motivo_id && (() => {
+                                        const motivoSelecionado = motivos.find(m => m.id === item.motivo_id);
+                                        const setorNome = motivoSelecionado ? (motivoSelecionado.setores as any)?.nome : null;
+                                        return setorNome ? `Setor: ${setorNome}` : '';
+                                      })()}
+                                    </div>
+                                    <div className="w-20 font-bold">R$ {Number(item.valor_total_nota || 0).toFixed(2)}</div>
+                                    <div className="w-12 text-center">{item.dias !== null && item.dias !== undefined ? item.dias : '-'}</div>
+                                    <div className="w-20">
+                                      <span className={`text-[9px] px-1 py-0.5 rounded ${
                                         item.prazo === 'EM ATRASO' 
                                           ? 'bg-red-500 text-white' 
                                           : item.prazo === 'NO PRAZO' 
@@ -1609,10 +1776,10 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                         {item.prazo || '-'}
                                       </span>
                                     </div>
-                                    <div className="w-40">
+                                    <div className="w-36">
                                         <Button
                                           size="sm"
-                                          className={`${RESULTADO_CORES[resultado]} cursor-pointer text-xs px-2 py-1 w-full`}
+                                          className={`${RESULTADO_CORES[resultado]} cursor-pointer text-[9px] px-1 py-0.5 w-full`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleResultadoChange(item.id, resultado);
@@ -1621,9 +1788,12 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                           {resultado}
                                         </Button>
                                     </div>
-                                    <div className="w-64 flex gap-1">
+                                    <div className="w-28 truncate text-[9px]" title={item.nome_validador || '-'}>
+                                      {item.nome_validador || '-'}
+                                    </div>
+                                    <div className="w-48 flex gap-1">
                                       <Textarea
-                                        className="h-8 text-xs min-h-[32px] max-h-[32px] resize-none flex-1"
+                                        className="h-7 text-[9px] min-h-[28px] max-h-[28px] resize-none flex-1"
                                         placeholder="Comentário..."
                                         value={comentarios[item.id] || ''}
                                         onChange={(e) => handleComentarioChange(item.id, e.target.value)}
@@ -1633,7 +1803,7 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        className="h-8 px-2"
+                                        className="h-7 px-1"
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           handleSalvarComentario(item.id);
@@ -1643,11 +1813,11 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                         <Save className="h-3 w-3" />
                                       </Button>
                                     </div>
-                                    <div className="w-[150px] flex gap-1">
+                                    <div className="w-28 flex gap-1">
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        className="h-8 px-2"
+                                        className="h-7 px-1"
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           handleShareWhatsApp(item);
@@ -1659,7 +1829,7 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        className="h-8 px-2"
+                                        className="h-7 px-1"
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           handleEdit(item);
@@ -1671,7 +1841,7 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                       <Button
                                         size="sm"
                                         variant="destructive"
-                                        className="h-8 px-2"
+                                        className="h-7 px-1"
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           handleDelete(item.id);
@@ -1709,22 +1879,60 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                             <TableCell className="text-xs">{prod.quantidade || '-'}</TableCell>
                                             <TableCell className="text-xs">R$ {Number(prod.valor_unitario || 0).toFixed(2)}</TableCell>
                                             <TableCell className="text-xs">R$ {Number(prod.valor_total_bruto || 0).toFixed(2)}</TableCell>
-                                            <TableCell className="text-xs">
-                                              <Select
+                                            <TableCell 
+                                              className="text-xs relative"
+                                              style={{ position: 'relative', zIndex: 9999 }}
+                                              onMouseDown={(e) => e.stopPropagation()}
+                                              onPointerDown={(e) => e.stopPropagation()}
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              <select
                                                 value={prod.motivo_id || ''}
-                                                onValueChange={(value) => handleMotivoItemChange(prod.id, value, item.id)}
+                                                onChange={(e) => {
+                                                  e.stopPropagation();
+                                                  handleMotivoItemChange(prod.id, e.target.value, item.id);
+                                                }}
+                                                onMouseDown={(e) => {
+                                                  e.stopPropagation();
+                                                }}
+                                                onPointerDown={(e) => {
+                                                  e.stopPropagation();
+                                                }}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                }}
+                                                onFocus={(e) => {
+                                                  e.stopPropagation();
+                                                }}
+                                                className="h-7 w-full px-2 text-xs border rounded-md bg-background cursor-pointer"
+                                                style={{ position: 'relative', zIndex: 9999 }}
                                               >
-                                                <SelectTrigger className="h-7 text-xs">
-                                                  <SelectValue placeholder="Selecione..." />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                  {motivos.map((motivo) => (
-                                                    <SelectItem key={motivo.id} value={motivo.id}>
-                                                      {motivo.nome}
-                                                    </SelectItem>
-                                                  ))}
-                                                </SelectContent>
-                                              </Select>
+                                                <option value="">Selecione...</option>
+                                                {motivos && motivos.length > 0 ? (
+                                                  motivos.map((motivo) => {
+                                                    const setorNome = (motivo.setores as any)?.nome || '';
+                                                    return (
+                                                      <option 
+                                                        key={motivo.id} 
+                                                        value={motivo.id}
+                                                      >
+                                                        {motivo.nome} {setorNome ? `(${setorNome})` : ''}
+                                                      </option>
+                                                    );
+                                                  })
+                                                ) : (
+                                                  <option value="" disabled>Carregando motivos...</option>
+                                                )}
+                                              </select>
+                                              {prod.motivo_id && (() => {
+                                                const motivoSelecionado = motivos.find(m => m.id === prod.motivo_id);
+                                                const setorNome = motivoSelecionado ? (motivoSelecionado.setores as any)?.nome : null;
+                                                return setorNome ? (
+                                                  <div className="text-xs text-muted-foreground mt-1">
+                                                    Setor: {setorNome}
+                                                  </div>
+                                                ) : null;
+                                              })()}
                                             </TableCell>
                                           </TableRow>
                                         ))
@@ -1737,6 +1945,13 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                       )}
                                     </TableBody>
                                   </Table>
+                                  {item.dados_adicionais && (
+                                    <div className="mt-4 pt-4 border-t">
+                                      <p className="text-[10px] font-bold italic text-muted-foreground whitespace-pre-wrap break-words">
+                                        {item.dados_adicionais}
+                                      </p>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </AccordionContent>
