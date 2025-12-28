@@ -10,12 +10,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/lib/supabase";
 import { useFilterStore, useAuthStore } from "@/lib/store";
 import { getDateRangeFromPeriod } from "@/lib/dateUtils";
-import { Loader2, FileSpreadsheet, FileText, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Loader2, FileSpreadsheet, FileText, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import ExcelJS from 'exceljs';
@@ -39,7 +44,8 @@ export function ReportsPage() {
   const { filters } = useFilterStore();
   const { user } = useAuthStore();
   const [data, setData] = useState<any[]>([]);
-  const [allData, setAllData] = useState<any[]>([]);
+  const [allData, setAllData] = useState<any[]>([]); // Todos os dados para relatório HTML
+  const [filteredData, setFilteredData] = useState<any[]>([]); // Dados filtrados para exibição na tela
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortField, setSortField] = useState<SortField | null>(null);
@@ -64,7 +70,7 @@ export function ReportsPage() {
       .from('devolucoes')
       .select(`
         *,
-        itens:itens_devolucao(*),
+        itens:itens_devolucao(*, motivo_item:motivos_devolucao(id, nome)),
         setores(nome),
         motivos_devolucao(nome, setores:setores(nome))
       `);
@@ -116,30 +122,72 @@ export function ReportsPage() {
       console.error(error);
       toast.error("Erro ao carregar dados do relatório");
     } else if (devolucoes) {
-      // Formatar dados para exibição/exportação
-      const formatted = devolucoes.map((r: any) => ({
-        ...r,
-        setor_nome: (typeof r.setores === 'object' && r.setores?.nome) ? r.setores.nome : (typeof r.setores === 'string' ? r.setores : '-'),
-        motivo_nome: (typeof r.motivos_devolucao === 'object' && r.motivos_devolucao?.nome) ? r.motivos_devolucao.nome : (typeof r.motivos_devolucao === 'string' ? r.motivos_devolucao : '-'),
-        itens_count: r.itens?.length || 0
-      }));
+      // Buscar dados dos clientes baseado no CNPJ (para TODOS os dados)
+      const cnpjs = devolucoes
+        .map(d => d.cnpj_destinatario)
+        .filter(cnpj => cnpj && cnpj.trim() !== '');
       
-      // Aplicar ordenação padrão inicialmente (a ordenação customizada será aplicada no useEffect)
-      const sortedDefault = formatted.sort((a, b) => {
+      let clientesMap = new Map();
+      if (cnpjs.length > 0) {
+        const { data: clientes } = await supabase
+          .from('clientes')
+          .select('cnpj_cpf, nome, vendedor, rede, uf, municipio')
+          .in('cnpj_cpf', cnpjs);
+        
+        if (clientes) {
+          clientes.forEach(cliente => {
+            clientesMap.set(cliente.cnpj_cpf, cliente);
+          });
+        }
+      }
+      
+      // Formatar TODOS os dados (sem filtro de resultado) para o relatório HTML
+      const formattedAll = devolucoes.map((r: any) => {
+        const cliente = clientesMap.get(r.cnpj_destinatario);
+        return {
+          ...r,
+          setor_nome: (typeof r.setores === 'object' && r.setores?.nome) ? r.setores.nome : (typeof r.setores === 'string' ? r.setores : '-'),
+          motivo_nome: (typeof r.motivos_devolucao === 'object' && r.motivos_devolucao?.nome) ? r.motivos_devolucao.nome : (typeof r.motivos_devolucao === 'string' ? r.motivos_devolucao : '-'),
+          itens_count: r.itens?.length || 0,
+          nome_cliente: cliente?.nome || r.nome_cliente || 'Cliente não encontrado',
+          vendedor: cliente?.vendedor || r.vendedor || '-',
+          rede: cliente?.rede || r.rede || '-',
+          uf_destino: cliente?.uf || r.uf_destino || '-',
+          cidade_destino: cliente?.municipio || r.cidade_destino || '-',
+          prazo: r.prazo || (r.resultado === 'LANÇADA' || r.resultado === 'ANULADA/CANCELADA' ? 'FINALIZADO' : r.prazo),
+          nome_validador: r.nome_validador || '-',
+          finalizada_por: r.finalizada_por || '-',
+          justificativa: r.justificativa || ''
+        };
+      });
+      
+      // Salvar TODOS os dados em allData (para relatório HTML usar todos os resultados)
+      const sortedAll = formattedAll.sort((a, b) => {
         const ordemA = RESULTADO_ORDEM[a.resultado] || 999;
         const ordemB = RESULTADO_ORDEM[b.resultado] || 999;
-        
-        if (ordemA !== ordemB) {
-          return ordemA - ordemB;
-        }
-        
-        // Se mesmo resultado, ordenar por data de emissão (mais recente primeiro)
+        if (ordemA !== ordemB) return ordemA - ordemB;
         const dataA = a.data_emissao ? new Date(a.data_emissao).getTime() : 0;
         const dataB = b.data_emissao ? new Date(b.data_emissao).getTime() : 0;
         return dataB - dataA;
       });
       
-      setAllData(sortedDefault);
+      setAllData(sortedAll);
+      
+      // Filtrar apenas LANÇADA e ANULADA/CANCELADA para exibição na tela
+      const devolucoesFiltradas = formattedAll.filter((d: any) => {
+        return d.resultado === 'LANÇADA' || d.resultado === 'ANULADA/CANCELADA';
+      });
+      
+      const sortedDefault = devolucoesFiltradas.sort((a, b) => {
+        const ordemA = RESULTADO_ORDEM[a.resultado] || 999;
+        const ordemB = RESULTADO_ORDEM[b.resultado] || 999;
+        if (ordemA !== ordemB) return ordemA - ordemB;
+        const dataA = a.data_emissao ? new Date(a.data_emissao).getTime() : 0;
+        const dataB = b.data_emissao ? new Date(b.data_emissao).getTime() : 0;
+        return dataB - dataA;
+      });
+      
+      setFilteredData(sortedDefault);
     }
     setLoading(false);
   };
@@ -904,9 +952,9 @@ export function ReportsPage() {
   
   // Aplicar ordenação customizada quando o usuário clicar nos cabeçalhos
   useEffect(() => {
-    if (allData.length === 0) return;
+    if (filteredData.length === 0) return;
     
-    let sorted = [...allData];
+    let sorted = [...filteredData];
     
     if (sortField && sortDirection) {
       sorted = [...allData].sort((a, b) => {
@@ -964,7 +1012,7 @@ export function ReportsPage() {
       });
     } else {
       // Se não houver ordenação customizada, aplicar ordenação padrão
-      sorted = [...allData].sort((a, b) => {
+      sorted = [...filteredData].sort((a, b) => {
         const ordemA = RESULTADO_ORDEM[a.resultado] || 999;
         const ordemB = RESULTADO_ORDEM[b.resultado] || 999;
         
@@ -982,7 +1030,7 @@ export function ReportsPage() {
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
     setData(sorted.slice(startIndex, endIndex));
-  }, [sortField, sortDirection, allData, currentPage]);
+  }, [sortField, sortDirection, filteredData, currentPage]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -1009,6 +1057,33 @@ export function ReportsPage() {
       return <ArrowUp className="ml-1 h-4 w-4" />;
     }
     return <ArrowDown className="ml-1 h-4 w-4" />;
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!user) return;
+
+    try {
+      // Deletar itens primeiro
+      const { error: itemsError } = await supabase
+        .from('itens_devolucao')
+        .delete()
+        .eq('devolucao_id', id);
+
+      if (itemsError) throw itemsError;
+
+      // Deletar registro principal
+      const { error: deleteError } = await supabase
+        .from('devolucoes')
+        .delete()
+        .eq('id', id);
+
+      if (deleteError) throw deleteError;
+
+      toast.success('Registro excluído com sucesso!');
+      fetchReportData(); // Recarregar dados
+    } catch (error: any) {
+      toast.error("Erro ao excluir registro: " + error.message);
+    }
   };
 
   const exportToExcel = async () => {
@@ -1248,9 +1323,11 @@ export function ReportsPage() {
         title="Relatórios" 
         description="Visualize e exporte relatórios detalhados das devoluções. Gere PDFs e planilhas Excel com todos os dados filtrados."
       />
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
-            <Button variant="outline" onClick={exportToExcel}>
+      
+      <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+        <FilterBar />
+        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto shrink-0">
+            <Button variant="outline" onClick={exportToExcel} className="w-full sm:w-auto">
                 <FileSpreadsheet className="mr-2 h-4 w-4 text-green-600" />
                 Exportar Excel
             </Button>
@@ -1278,14 +1355,12 @@ export function ReportsPage() {
                 newWindow.document.write(htmlContent);
                 newWindow.document.close();
               }
-            }}>
+            }} className="w-full sm:w-auto">
                 <FileText className="mr-2 h-4 w-4" />
                 Gerar Relatório
             </Button>
         </div>
       </div>
-      
-      <FilterBar />
 
       <Card>
         <CardHeader>
@@ -1301,102 +1376,182 @@ export function ReportsPage() {
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('data_emissao')}>
+                                <TableHead className="w-[50px]"></TableHead>
+                                <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('data_emissao')}>
                                     <div className="flex items-center">
                                         Data Emissão
                                         <SortIcon field="data_emissao" />
                                     </div>
                                 </TableHead>
-                                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('numero')}>
+                                <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('numero')}>
                                     <div className="flex items-center">
                                         Nota Fiscal
                                         <SortIcon field="numero" />
                                     </div>
                                 </TableHead>
-                                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('nome_cliente')}>
+                                <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('nome_cliente')}>
                                     <div className="flex items-center">
                                         Cliente
                                         <SortIcon field="nome_cliente" />
                                     </div>
                                 </TableHead>
-                                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('vendedor')}>
+                                <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('vendedor')}>
                                     <div className="flex items-center">
                                         Vendedor
                                         <SortIcon field="vendedor" />
                                     </div>
                                 </TableHead>
-                                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('motivo')}>
+                                <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('motivo')}>
                                     <div className="flex items-center">
                                         Motivo
                                         <SortIcon field="motivo" />
                                     </div>
                                 </TableHead>
-                                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('cidade_origem')}>
+                                <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('valor_total_nota')}>
                                     <div className="flex items-center">
-                                        Origem
-                                        <SortIcon field="cidade_origem" />
+                                        Valor Total
+                                        <SortIcon field="valor_total_nota" />
                                     </div>
                                 </TableHead>
-                                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('dias')}>
-                                    <div className="flex items-center">
-                                        Dias
-                                        <SortIcon field="dias" />
-                                    </div>
-                                </TableHead>
-                                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('prazo')}>
+                                <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('prazo')}>
                                     <div className="flex items-center">
                                         Prazo
                                         <SortIcon field="prazo" />
                                     </div>
                                 </TableHead>
-                                <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('resultado')}>
+                                <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('resultado')}>
                                     <div className="flex items-center">
                                         Resultado
                                         <SortIcon field="resultado" />
                                     </div>
                                 </TableHead>
-                                <TableHead className="text-right cursor-pointer hover:bg-muted/50" onClick={() => handleSort('valor_total_nota')}>
-                                    <div className="flex items-center justify-end">
-                                        Valor Total
-                                        <SortIcon field="valor_total_nota" />
-                                    </div>
-                                </TableHead>
+                                <TableHead className="text-[10px] px-2">Validado Por</TableHead>
+                                <TableHead className="text-[10px] px-2">Finalizada Por</TableHead>
+                                <TableHead className="text-[10px] px-2">Comentário</TableHead>
+                                <TableHead className="text-[10px] px-2">Ações</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {data.map((row) => (
-                                <TableRow key={row.id}>
-                                    <TableCell>{row.data_emissao ? format(new Date(row.data_emissao), 'dd/MM/yyyy') : '-'}</TableCell>
-                                    <TableCell>{row.numero}</TableCell>
-                                    <TableCell className="max-w-[200px] truncate" title={row.nome_cliente}>{row.nome_cliente}</TableCell>
-                                    <TableCell className="max-w-[150px] truncate">{row.vendedor}</TableCell>
-                                    <TableCell className="max-w-[200px] truncate" title={row.motivo_nome}>{row.motivo_nome || '-'}</TableCell>
-                                    <TableCell>{row.cidade_origem}/{row.uf_origem}</TableCell>
-                                    <TableCell className="text-center">{row.dias !== null && row.dias !== undefined ? row.dias : '-'}</TableCell>
-                                    <TableCell>
-                                      <Badge className={
-                                        row.prazo === 'EM ATRASO' 
-                                          ? 'bg-red-500 hover:bg-red-600' 
-                                          : row.prazo === 'NO PRAZO' 
-                                          ? 'bg-green-500 hover:bg-green-600' 
-                                          : 'bg-gray-500 hover:bg-gray-600'
-                                      }>
-                                        {row.prazo || '-'}
-                                      </Badge>
-                                    </TableCell>
-                                    <TableCell>
-                                        <Badge variant={row.resultado === 'VALIDADA' || row.resultado === 'LANÇADA' ? 'default' : row.resultado === 'ANULADA/CANCELADA' ? 'destructive' : 'secondary'} className="text-[10px]">
-                                            {row.resultado || 'PENDENTE VALIDAÇÃO'}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell className="text-right font-medium">
-                                        R$ {Number(row.valor_total_nota || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            {data.map((item) => (
+                                <TableRow key={item.id} className="group">
+                                    <TableCell colSpan={13} className="p-0 border-b">
+                                        <Accordion type="single" collapsible className="w-full">
+                                            <AccordionItem value={item.id} className="border-b-0">
+                                                <div className="flex items-center w-full py-2 px-4 hover:bg-muted/50">
+                                                    <div className="flex gap-2 w-full items-center text-[10px]">
+                                                        <AccordionTrigger className="w-[50px] py-0 pr-4 hover:no-underline flex-shrink-0"></AccordionTrigger>
+                                                        <div className="w-20">{item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy') : '-'}</div>
+                                                        <div className="w-20 font-medium">{item.numero}</div>
+                                                        <div className="w-32 truncate" title={item.nome_cliente}>{item.nome_cliente}</div>
+                                                        <div className="w-24 truncate" title={item.vendedor}>{item.vendedor}</div>
+                                                        <div className="w-40 truncate" title={item.motivo_nome}>{item.motivo_nome || '-'}</div>
+                                                        <div className="w-28 text-right">R$ {Number(item.valor_total_nota || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+                                                        <div className="w-20">
+                                                            <span className={`text-[9px] px-1 py-0.5 rounded ${
+                                                                item.prazo === 'EM ATRASO' 
+                                                                    ? 'bg-red-500 text-white' 
+                                                                    : item.prazo === 'NO PRAZO' 
+                                                                    ? 'bg-green-500 text-white'
+                                                                    : item.prazo === 'FINALIZADO'
+                                                                    ? 'bg-green-200 text-green-800 dark:bg-green-900 dark:text-green-200'
+                                                                    : 'bg-gray-500 text-white'
+                                                            }`}>
+                                                                {item.prazo || '-'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="w-32">
+                                                            <span className={`text-[9px] px-1 py-0.5 rounded ${
+                                                                item.resultado === 'VALIDADA' || item.resultado === 'LANÇADA'
+                                                                    ? 'bg-blue-500 text-white'
+                                                                    : item.resultado === 'ANULADA/CANCELADA'
+                                                                    ? 'bg-red-500 text-white'
+                                                                    : 'bg-gray-500 text-white'
+                                                            }`}>
+                                                                {item.resultado || '-'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="w-28 truncate text-[9px]" title={item.nome_validador || '-'}>
+                                                            {item.nome_validador || '-'}
+                                                        </div>
+                                                        <div className="w-28 truncate text-[9px]" title={item.finalizada_por || '-'}>
+                                                            {item.finalizada_por || '-'}
+                                                        </div>
+                                                        <div className="w-48 truncate text-[9px]" title={item.justificativa || '-'}>
+                                                            {item.justificativa || '-'}
+                                                        </div>
+                                                        <div className="w-28 flex gap-1">
+                                                            {(user?.role === 'ADMIN' || user?.role === 'LOGISTICA') && (
+                                                                <>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="destructive"
+                                                                        className="h-7 px-1"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            if (confirm('Tem certeza que deseja excluir este registro?')) {
+                                                                                handleDelete(item.id);
+                                                                            }
+                                                                        }}
+                                                                        title="Excluir"
+                                                                    >
+                                                                        <Trash2 className="h-3 w-3" />
+                                                                    </Button>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <AccordionContent>
+                                                    <div className="px-4 pb-4">
+                                                        <div className="rounded-md border bg-muted/50 p-4">
+                                                            <h4 className="font-semibold mb-2 text-sm">Itens da Devolução</h4>
+                                                            <Table>
+                                                                <TableHeader>
+                                                                    <TableRow>
+                                                                        <TableHead className="h-8 text-xs">Número</TableHead>
+                                                                        <TableHead className="h-8 text-xs">Descrição</TableHead>
+                                                                        <TableHead className="h-8 text-xs">Unidade</TableHead>
+                                                                        <TableHead className="h-8 text-xs">Quantidade</TableHead>
+                                                                        <TableHead className="h-8 text-xs">Valor Unitário</TableHead>
+                                                                        <TableHead className="h-8 text-xs">Valor Total Bruto</TableHead>
+                                                                        <TableHead className="h-8 text-xs">Motivo</TableHead>
+                                                                    </TableRow>
+                                                                </TableHeader>
+                                                                <TableBody>
+                                                                    {item.itens && item.itens.length > 0 ? (
+                                                                        item.itens.map((prod: any, idx: number) => (
+                                                                            <TableRow key={idx}>
+                                                                                <TableCell className="text-xs">{prod.numero_item || '-'}</TableCell>
+                                                                                <TableCell className="text-xs">{prod.descricao || '-'}</TableCell>
+                                                                                <TableCell className="text-xs">{prod.unidade || '-'}</TableCell>
+                                                                                <TableCell className="text-xs">{prod.quantidade || '-'}</TableCell>
+                                                                                <TableCell className="text-xs">R$ {Number(prod.valor_unitario || 0).toFixed(2)}</TableCell>
+                                                                                <TableCell className="text-xs">R$ {Number(prod.valor_total_bruto || 0).toFixed(2)}</TableCell>
+                                                                                <TableCell className="text-xs">
+                                                                                    {prod.motivo_item?.nome || '-'}
+                                                                                </TableCell>
+                                                                            </TableRow>
+                                                                        ))
+                                                                    ) : (
+                                                                        <TableRow>
+                                                                            <TableCell colSpan={7} className="text-center text-xs text-muted-foreground">
+                                                                                Nenhum item cadastrado
+                                                                            </TableCell>
+                                                                        </TableRow>
+                                                                    )}
+                                                                </TableBody>
+                                                            </Table>
+                                                        </div>
+                                                    </div>
+                                                </AccordionContent>
+                                            </AccordionItem>
+                                        </Accordion>
                                     </TableCell>
                                 </TableRow>
                             ))}
                             {data.length === 0 && (
                                 <TableRow>
-                                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                                    <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
                                         Nenhum dado encontrado com os filtros atuais.
                                     </TableCell>
                                 </TableRow>
@@ -1409,10 +1564,10 @@ export function ReportsPage() {
       </Card>
 
       {/* Paginação */}
-      {!loading && allData.length > 0 && (
+      {!loading && filteredData.length > 0 && (
         <div className="flex items-center justify-between">
           <div className="text-sm text-muted-foreground">
-            Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, allData.length)} de {allData.length} registros
+            Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, filteredData.length)} de {filteredData.length} registros
           </div>
           <div className="flex gap-2">
             <Button
@@ -1425,9 +1580,9 @@ export function ReportsPage() {
               Anterior
             </Button>
             <div className="flex items-center gap-1">
-              {Array.from({ length: Math.ceil(allData.length / itemsPerPage) }, (_, i) => i + 1)
+              {Array.from({ length: Math.ceil(filteredData.length / itemsPerPage) }, (_, i) => i + 1)
                 .filter(page => {
-                  const totalPages = Math.ceil(allData.length / itemsPerPage);
+                  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
                   return page === 1 || page === totalPages || (page >= currentPage - 2 && page <= currentPage + 2);
                 })
                 .map((page, index, array) => {
@@ -1451,8 +1606,8 @@ export function ReportsPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setCurrentPage(prev => Math.min(Math.ceil(allData.length / itemsPerPage), prev + 1))}
-              disabled={currentPage >= Math.ceil(allData.length / itemsPerPage)}
+              onClick={() => setCurrentPage(prev => Math.min(Math.ceil(filteredData.length / itemsPerPage), prev + 1))}
+              disabled={currentPage >= Math.ceil(filteredData.length / itemsPerPage)}
             >
               Próxima
               <ChevronRight className="h-4 w-4 ml-1" />

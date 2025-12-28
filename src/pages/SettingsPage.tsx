@@ -48,7 +48,7 @@ export function SettingsPage() {
   const [newUserName, setNewUserName] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
   const [newUserPassword, setNewUserPassword] = useState("");
-  const [newUserRole, setNewUserRole] = useState<UserRole>("COMERCIAL");
+  const [newUserRole, setNewUserRole] = useState<UserRole>("NOVO");
   const [newUserVendedor, setNewUserVendedor] = useState<string>("");
 
   useEffect(() => {
@@ -212,30 +212,15 @@ export function SettingsPage() {
       return;
     }
     
-    // Validar se VENDEDOR tem vendedor selecionado
-    if (newUserRole === 'VENDEDOR' && !newUserVendedor) {
-      toast.error("Usuários do tipo VENDEDOR devem ter um vendedor selecionado");
-      return;
-    }
-    
-    // Validar role válido
-    const validRoles = ['ADMIN', 'GESTOR', 'COMERCIAL', 'LOGISTICA', 'VENDEDOR'];
-    if (!validRoles.includes(newUserRole)) {
-      toast.error("Role inválido. Selecione um role válido.");
-      return;
-    }
+    // REMOVIDO: Validação de role - novos usuários não têm role
+    // Admin deve atribuir role depois pelo app ou Supabase
     
     try {
-      // Preparar metadata do usuário
+      // Preparar metadata do usuário - SEM ROLE (será null)
       const userMetadata: any = {
-        name: newUserName,
-        role: newUserRole
+        name: newUserName
+        // NÃO incluir role - novo usuário não terá role até admin atribuir
       };
-      
-      // Adicionar vendedor apenas se for VENDEDOR
-      if (newUserRole === 'VENDEDOR' && newUserVendedor) {
-        userMetadata.vendedor = newUserVendedor;
-      }
       
       // Criar usuário no auth (usando signUp que cria o usuário e o perfil via trigger)
       const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -296,12 +281,13 @@ export function SettingsPage() {
           if (profileCheckErrorRetry || !profileDataRetry) {
             // Tentar inserir se não existir (caso o trigger não tenha funcionado)
             // Como ADMIN, devemos ter permissão para inserir
+            // NOVO USUÁRIO COM TIPO "NOVO"
             const { error: insertError } = await supabase.from('profiles').insert({
               id: authData.user.id,
               name: newUserName,
               email: newUserEmail.trim().toLowerCase(),
-              role: newUserRole,
-              vendedor: newUserRole === 'VENDEDOR' ? newUserVendedor : null
+              role: 'NOVO', // Tipo NOVO até admin atribuir outro role
+              vendedor: null
             });
             
             if (insertError) {
@@ -319,10 +305,11 @@ export function SettingsPage() {
         
         if (profileData) {
           // Atualizar perfil com dados adicionais (caso o trigger não tenha passado tudo)
+          // NOVO USUÁRIO COM TIPO "NOVO" - admin deve atribuir outro role depois
           const { error: profileError } = await supabase.from('profiles').update({
             name: newUserName,
-            role: newUserRole,
-            vendedor: newUserRole === 'VENDEDOR' ? newUserVendedor : null
+            role: 'NOVO', // Tipo NOVO até admin atribuir outro role
+            vendedor: null
           }).eq('id', authData.user.id);
           
           if (profileError) {
@@ -331,11 +318,11 @@ export function SettingsPage() {
           }
         }
         
-        toast.success("Usuário criado com sucesso!");
+        toast.success("Usuário criado com sucesso! O usuário foi criado como tipo NOVO. Atribua a função apropriada na gestão de usuários.");
         setNewUserName("");
         setNewUserEmail("");
         setNewUserPassword("");
-        setNewUserRole("COMERCIAL");
+        setNewUserRole("NOVO");
         setNewUserVendedor("");
         fetchData();
       } else {
@@ -356,19 +343,51 @@ export function SettingsPage() {
         return;
       }
       
+      // Validar role
+      if (!editRole || editRole === 'NOVO') {
+        toast.error("Selecione um role válido para o usuário");
+        return;
+      }
+      
       try {
-        // Atualizar perfil
-        const { error: profileError } = await supabase
+        // Atualizar perfil no Supabase
+        const updateData: any = { 
+          name: editName.trim()
+        };
+        
+        // Sempre atualizar role se foi fornecido
+        if (editRole) {
+          updateData.role = editRole;
+        }
+        
+        // Atualizar vendedor se necessário
+        if (editRole === 'VENDEDOR') {
+          updateData.vendedor = editVendedor || null;
+        } else {
+          updateData.vendedor = null;
+        }
+        
+        console.log('🔄 Atualizando usuário:', editingUser.id, 'com dados:', updateData);
+        
+        // Usar RPC ou update direto com permissões corretas
+        const { error: profileError, data: updatedData } = await supabase
           .from('profiles')
-          .update({ 
-            name: editName, 
-            role: editRole,
-            vendedor: editRole === 'VENDEDOR' ? editVendedor : null
-          })
-          .eq('id', editingUser.id);
+          .update(updateData)
+          .eq('id', editingUser.id)
+          .select();
           
         if (profileError) {
+          console.error("Erro ao atualizar perfil:", profileError);
+          console.error("Detalhes do erro:", JSON.stringify(profileError, null, 2));
           toast.error("Erro ao atualizar usuário: " + profileError.message);
+          return;
+        }
+        
+        console.log('✅ Usuário atualizado com sucesso:', updatedData);
+        
+        // Verificar se realmente foi atualizado
+        if (!updatedData || updatedData.length === 0) {
+          toast.error("Usuário não foi atualizado. Verifique as permissões.");
           return;
         }
         
@@ -381,10 +400,12 @@ export function SettingsPage() {
           setEditPassword("");
         }
         
-        toast.success("Usuário atualizado!");
+        toast.success("Usuário atualizado com sucesso!");
         setEditingUser(null);
+        setEditPassword("");
         fetchData();
       } catch (error: any) {
+        console.error("Erro ao atualizar usuário:", error);
         toast.error("Erro ao atualizar usuário: " + error.message);
       }
   };
@@ -445,12 +466,14 @@ export function SettingsPage() {
       />
 
       <Tabs defaultValue="master-data">
-        <TabsList>
-            <TabsTrigger value="master-data">Master Data (Setores/Motivos)</TabsTrigger>
-            <TabsTrigger value="vendedores">Vendedores</TabsTrigger>
-            <TabsTrigger value="clientes">Clientes</TabsTrigger>
-            <TabsTrigger value="users">Usuários</TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto">
+          <TabsList className="w-full md:w-auto min-w-full md:min-w-0">
+              <TabsTrigger value="master-data" className="text-xs sm:text-sm whitespace-nowrap">Master Data (Setores/Motivos)</TabsTrigger>
+              <TabsTrigger value="vendedores" className="text-xs sm:text-sm whitespace-nowrap">Vendedores</TabsTrigger>
+              <TabsTrigger value="clientes" className="text-xs sm:text-sm whitespace-nowrap">Clientes</TabsTrigger>
+              <TabsTrigger value="users" className="text-xs sm:text-sm whitespace-nowrap">Usuários</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="master-data" className="space-y-6 mt-6">
             <div className="grid gap-6 md:grid-cols-2">
@@ -742,28 +765,20 @@ export function SettingsPage() {
                                     placeholder="Senha"
                                 />
                             </div>
+                            {/* Removido: Novos usuários sempre são criados como tipo NOVO */}
+                            {/* Admin deve atribuir role depois na gestão de usuários */}
                             <div className="space-y-2">
                                 <Label>Função</Label>
-                                <Select value={newUserRole} onValueChange={(val: UserRole) => {
-                                    setNewUserRole(val);
-                                    // Se mudar para não-VENDEDOR, limpar vendedor
-                                    if (val !== 'VENDEDOR') {
-                                        setNewUserVendedor('');
-                                    }
-                                }}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="ADMIN">ADMIN</SelectItem>
-                                        <SelectItem value="GESTOR">GESTOR</SelectItem>
-                                        <SelectItem value="COMERCIAL">COMERCIAL</SelectItem>
-                                        <SelectItem value="LOGISTICA">LOGISTICA</SelectItem>
-                                        <SelectItem value="VENDEDOR">VENDEDOR</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                <Input 
+                                    value="NOVO (Será atribuído pelo Admin)" 
+                                    disabled 
+                                    className="bg-muted"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Novos usuários são criados como tipo NOVO. O administrador deve atribuir a função apropriada após o cadastro.
+                                </p>
                             </div>
-                            {newUserRole === 'VENDEDOR' && (
+                            {false && newUserRole === 'VENDEDOR' && (
                                 <div className="space-y-2">
                                     <Label>Vendedor *</Label>
                                     <Select value={newUserVendedor} onValueChange={setNewUserVendedor}>
@@ -813,8 +828,12 @@ export function SettingsPage() {
                                         <TableCell className="font-medium">{u.name}</TableCell>
                                         <TableCell>{u.email}</TableCell>
                                         <TableCell>
-                                            <Badge variant={u.role === 'ADMIN' ? 'default' : 'secondary'}>
-                                                {u.role}
+                                            <Badge variant={
+                                              u.role === 'ADMIN' ? 'default' : 
+                                              u.role === 'NOVO' ? 'destructive' : 
+                                              'secondary'
+                                            }>
+                                                {u.role || 'NOVO'}
                                             </Badge>
                                         </TableCell>
                                         <TableCell>
@@ -856,9 +875,9 @@ export function SettingsPage() {
                                                         <div className="space-y-2">
                                                             <Label>Função (Role)</Label>
                                                             <Select 
-                                                                value={editRole} 
-                                                                onValueChange={(val: UserRole) => {
-                                                                    setEditRole(val);
+                                                                value={editRole || ''} 
+                                                                onValueChange={(val: string) => {
+                                                                    setEditRole(val as UserRole);
                                                                     // Se mudar para não-VENDEDOR, limpar vendedor
                                                                     if (val !== 'VENDEDOR') {
                                                                         setEditVendedor('');
@@ -874,6 +893,7 @@ export function SettingsPage() {
                                                                     <SelectItem value="COMERCIAL">COMERCIAL</SelectItem>
                                                                     <SelectItem value="LOGISTICA">LOGISTICA</SelectItem>
                                                                     <SelectItem value="VENDEDOR">VENDEDOR</SelectItem>
+                                                                    <SelectItem value="NOVO">NOVO (Sem Acesso)</SelectItem>
                                                                 </SelectContent>
                                                             </Select>
                                                         </div>

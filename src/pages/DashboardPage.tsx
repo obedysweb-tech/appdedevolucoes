@@ -32,16 +32,17 @@ import {
   BarChart,
   Bar,
   ComposedChart,
-  Line
+  Line,
+  LabelList
 } from 'recharts';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 
-// Cores Doce Mel (Verde e tons derivados) + Ciano para Dark Mode
-const COLORS_LIGHT = ['#18442b', '#2e6b4d', '#4a9170', '#70b896', '#9cdebd', '#c4f0da'];
-const COLORS_DARK = ['#3fedef', '#2cb5b8', '#1e8285', '#135457', '#0a2e30', '#000000'];
+// Cores padronizadas
+const COLORS_LIGHT = ['#17432a', '#17432a', '#17432a', '#17432a', '#17432a', '#17432a'];
+const COLORS_DARK = ['#d2f8f7', '#d2f8f7', '#d2f8f7', '#d2f8f7', '#d2f8f7', '#d2f8f7'];
 
 // Componente customizado para quebrar texto no eixo X
 const CustomXAxisTick = ({ x, y, payload }: any) => {
@@ -112,6 +113,8 @@ export function DashboardPage() {
   const [canceladasData, setCanceladasData] = useState<any[]>([]);
   const [topProdutos, setTopProdutos] = useState<any[]>([]);
   const [municipioData, setMunicipioData] = useState<any[]>([]);
+  const [clientesReincidencia, setClientesReincidencia] = useState<any[]>([]);
+  const [motivosPorRede, setMotivosPorRede] = useState<any[]>([]);
 
   useEffect(() => {
     const checkTheme = () => {
@@ -141,7 +144,7 @@ export function DashboardPage() {
           *,
           motivos_devolucao(nome),
           setores(nome),
-          itens:itens_devolucao(quantidade, descricao, motivo_id, valor_total_bruto)
+          itens:itens_devolucao(quantidade, descricao, motivo_id, valor_total_bruto, unidade)
       `);
     
     // Filtrar por vendedor do usuário (apenas se for tipo VENDEDOR)
@@ -232,19 +235,26 @@ export function DashboardPage() {
             return acc + itens.reduce((sum: number, item: any) => sum + (Number(item.quantidade) || 0), 0);
         }, 0);
         
+        // Calcular notas fora do SLA (PRAZO = 'EM ATRASO')
+        const slaBreach = devolucoes.filter(d => d.prazo === 'EM ATRASO').length;
+        
         setStats({
             totalValue,
             totalReturns,
             avgTicket,
-            slaBreach: 0,
+            slaBreach,
             totalProducts
         });
 
-        // 2. Gráfico de Evolução (Agrupar por Dia)
+        // 2. Gráfico de Evolução (Agrupar por Dia) - Incluir valor e quantidade de notas
         const groupedByDay = devolucoes.reduce((acc: any, curr) => {
             const date = new Date(curr.data_emissao || curr.created_at);
             const day = format(date, 'dd/MM', { locale: ptBR });
-            acc[day] = (acc[day] || 0) + (Number(curr.valor_total_nota) || 0);
+            if (!acc[day]) {
+                acc[day] = { value: 0, count: 0 };
+            }
+            acc[day].value += (Number(curr.valor_total_nota) || 0);
+            acc[day].count += 1;
             return acc;
         }, {});
 
@@ -257,7 +267,8 @@ export function DashboardPage() {
             })
             .map(key => ({
                 name: key,
-                value: groupedByDay[key]
+                value: groupedByDay[key].value,
+                count: groupedByDay[key].count
             }));
         setChartData(chart);
 
@@ -331,10 +342,10 @@ export function DashboardPage() {
         }).slice(0, 10);
         setParetoData(pareto);
         
-        // Heatmap: Produto × Rede (usando quantidade total devolvida)
+        // Heatmap: Produto × Rede (usando quantidade total devolvida com unidade real)
         // Filtrar apenas notas com resultado "PENDENTE VALIDAÇÃO"
         const devolucoesPendentes = devolucoes.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO');
-        const produtoRedeMap: Record<string, Record<string, number>> = {};
+        const produtoRedeMap: Record<string, Record<string, { quantidade: number, unidade: string }>> = {};
         devolucoesPendentes.forEach(devol => {
             const itens = devol.itens || [];
             // Usar rede da devolução para todos os itens
@@ -348,9 +359,14 @@ export function DashboardPage() {
                 if (!produtoRedeMap[produto]) {
                     produtoRedeMap[produto] = {};
                 }
-                // Usar quantidade devolvida do item e somar com produtos que têm as mesmas 2 primeiras palavras
+                // Usar quantidade devolvida do item e unidade real
                 const quantidadeItem = Number(item.quantidade) || 0;
-                produtoRedeMap[produto][rede] = (produtoRedeMap[produto][rede] || 0) + quantidadeItem;
+                const unidade = item.unidade || 'UN';
+                
+                if (!produtoRedeMap[produto][rede]) {
+                    produtoRedeMap[produto][rede] = { quantidade: 0, unidade: unidade };
+                }
+                produtoRedeMap[produto][rede].quantidade += quantidadeItem;
             });
         });
         
@@ -367,7 +383,8 @@ export function DashboardPage() {
         const heatmap = produtos.map(produto => {
             const row: any = { produto };
             redes.forEach(rede => {
-                row[rede] = produtoRedeMap[produto]?.[rede] || 0;
+                const data = produtoRedeMap[produto]?.[rede];
+                row[rede] = data || { quantidade: 0, unidade: 'UN' };
             });
             return row;
         });
@@ -462,28 +479,120 @@ export function DashboardPage() {
             }));
         setCanceladasData(canceladasChart);
         
-        // 7. Produtos Críticos - Top 10 produtos mais devolvidos (soma de quantidade)
-        const produtosMap: Record<string, number> = {};
+        // 7. Produtos Críticos - Separar por unidade (CX e UN)
+        // Função para normalizar unidades
+        const normalizarUnidade = (unidade: string): 'CX' | 'UN' | null => {
+            if (!unidade) return null;
+            const unidadeUpper = unidade.toUpperCase().trim();
+            // CX = CX1 = CXS = FD
+            if (['CX', 'CX1', 'CXS', 'FD'].includes(unidadeUpper)) {
+                return 'CX';
+            }
+            // UN = UND = UN1 = UNID = BD = BDJ = KG = KG1 = KGS = PTC = PT = PT1 = PC = PC1 = SC = SC1
+            if (['UN', 'UND', 'UN1', 'UNID', 'BD', 'BDJ', 'KG', 'KG1', 'KGS', 'PTC', 'PT', 'PT1', 'PC', 'PC1', 'SC', 'SC1'].includes(unidadeUpper)) {
+                return 'UN';
+            }
+            return null;
+        };
+        
+        const produtosMapCX: Record<string, { quantidade: number, unidade: string }> = {};
+        const produtosMapUN: Record<string, { quantidade: number, unidade: string }> = {};
+        
         devolucoes.forEach(devol => {
             const itens = devol.itens || [];
             itens.forEach((item: any) => {
                 const produto = item.descricao || 'Desconhecido';
                 const quantidade = Number(item.quantidade) || 0;
-                produtosMap[produto] = (produtosMap[produto] || 0) + quantidade;
+                const unidade = item.unidade || '';
+                const unidadeNormalizada = normalizarUnidade(unidade);
+                
+                if (unidadeNormalizada === 'CX') {
+                    if (!produtosMapCX[produto]) {
+                        produtosMapCX[produto] = { quantidade: 0, unidade: unidade };
+                    }
+                    produtosMapCX[produto].quantidade += quantidade;
+                } else if (unidadeNormalizada === 'UN') {
+                    if (!produtosMapUN[produto]) {
+                        produtosMapUN[produto] = { quantidade: 0, unidade: unidade };
+                    }
+                    produtosMapUN[produto].quantidade += quantidade;
+                }
             });
         });
         
-        const topProdutosList = Object.entries(produtosMap)
-            .map(([name, quantidade]) => {
-                // Pegar apenas as 2 primeiras palavras do nome do produto
+        // Top 5 produtos em CX
+        const topProdutosCX = Object.entries(produtosMapCX)
+            .map(([name, data]) => {
                 const palavras = name.split(' ');
                 const nomeReduzido = palavras.slice(0, 2).join(' ');
-                return { name: nomeReduzido, nameFull: name, quantidade };
+                return { name: nomeReduzido, nameFull: name, quantidade: data.quantidade, unidade: data.unidade, tipo: 'CX' };
             })
             .sort((a: any, b: any) => b.quantidade - a.quantidade)
-            .slice(0, 10);
+            .slice(0, 5);
+        
+        // Top 5 produtos em UN
+        const topProdutosUN = Object.entries(produtosMapUN)
+            .map(([name, data]) => {
+                const palavras = name.split(' ');
+                const nomeReduzido = palavras.slice(0, 2).join(' ');
+                return { name: nomeReduzido, nameFull: name, quantidade: data.quantidade, unidade: data.unidade, tipo: 'UN' };
+            })
+            .sort((a: any, b: any) => b.quantidade - a.quantidade)
+            .slice(0, 5);
+        
+        // Combinar ambos (CX primeiro, depois UN)
+        const topProdutosList = [...topProdutosCX, ...topProdutosUN];
         console.log('🔥 Top Produtos:', topProdutosList);
         setTopProdutos(topProdutosList);
+        
+        // 8. Clientes com maior reincidência (TRATATIVA DE ANULAÇÃO e ANULADA/CANCELADA)
+        const clientesReincidenciaMap: Record<string, number> = {};
+        devolucoes
+            .filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO' || d.resultado === 'ANULADA/CANCELADA')
+            .forEach((curr) => {
+                const cliente = curr.nome_cliente || 'Desconhecido';
+                clientesReincidenciaMap[cliente] = (clientesReincidenciaMap[cliente] || 0) + 1;
+            });
+        
+        const clientesReincidenciaList = Object.entries(clientesReincidenciaMap)
+            .map(([name, count]) => ({ name, count }))
+            .sort((a: any, b: any) => b.count - a.count)
+            .slice(0, 5);
+        setClientesReincidencia(clientesReincidenciaList);
+        
+        // 9. Motivos mais recorrentes por rede
+        const motivosPorRedeMap: Record<string, Record<string, number>> = {};
+        devolucoes.forEach((curr) => {
+            const rede = curr.rede || 'Sem rede';
+            const motivoNome = curr.motivos_devolucao?.nome || 'Não informado';
+            
+            if (!motivosPorRedeMap[rede]) {
+                motivosPorRedeMap[rede] = {};
+            }
+            motivosPorRedeMap[rede][motivoNome] = (motivosPorRedeMap[rede][motivoNome] || 0) + 1;
+        });
+        
+        // Transformar em array para gráfico (top 5 redes com seus motivos mais recorrentes)
+        const motivosPorRedeList: any[] = [];
+        Object.entries(motivosPorRedeMap)
+            .sort((a, b) => {
+                const totalA = Object.values(a[1]).reduce((sum: number, val: any) => sum + val, 0);
+                const totalB = Object.values(b[1]).reduce((sum: number, val: any) => sum + val, 0);
+                return totalB - totalA;
+            })
+            .slice(0, 5)
+            .forEach(([rede, motivos]) => {
+                const motivoMaisRecorrente = Object.entries(motivos)
+                    .sort((a: any, b: any) => b[1] - a[1])[0];
+                if (motivoMaisRecorrente) {
+                    motivosPorRedeList.push({
+                        rede: rede.length > 15 ? rede.substring(0, 15) + '...' : rede,
+                        motivo: motivoMaisRecorrente[0].length > 20 ? motivoMaisRecorrente[0].substring(0, 20) + '...' : motivoMaisRecorrente[0],
+                        count: motivoMaisRecorrente[1]
+                    });
+                }
+            });
+        setMotivosPorRede(motivosPorRedeList);
         
         // Insights automáticos - Expandido (movido para depois de calcular todos os dados)
         const insightsList: string[] = [];
@@ -612,18 +721,18 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <PageHeader 
-          title="Dashboard" 
-          description="Visão geral das devoluções com KPIs, gráficos e insights automáticos para análise estratégica."
-        />
-        <Button variant="outline" size="sm" onClick={fetchDashboardData} className="ml-4">
+      <PageHeader 
+        title="Dashboard" 
+        description="Visão geral das devoluções com KPIs, gráficos e insights automáticos para análise estratégica."
+      />
+      
+      <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+        <FilterBar />
+        <Button variant="outline" size="sm" onClick={fetchDashboardData} className="w-full md:w-auto shrink-0">
             <RefreshCw className="mr-2 h-4 w-4" />
             Atualizar
         </Button>
       </div>
-      
-      <FilterBar />
 
       {/* Alertas */}
       {alerts.length > 0 && (
@@ -663,7 +772,7 @@ export function DashboardPage() {
         />
         <KPICard 
           title="Produtos Devolvidos" 
-          value={stats.totalProducts}
+          value={stats.totalProducts.toFixed(2)}
           icon={PackageX}
           description="Quantidade total"
         />
@@ -713,7 +822,16 @@ export function DashboardPage() {
                         fontSize: '11px',
                         fontWeight: 'bold'
                     }}
-                    formatter={(value: number | undefined) => [`R$ ${(value || 0).toFixed(2)}`, 'Valor']}
+                    formatter={(value: any, name: string | undefined) => {
+                        if (name === 'value') {
+                            return [`R$ ${(value || 0).toFixed(2)}`, 'Valor Total'];
+                        }
+                        if (name === 'count') {
+                            return [`${value || 0}`, 'Qtd de Notas'];
+                        }
+                        return [value, name || ''];
+                    }}
+                    labelFormatter={(label) => `Data: ${label}`}
                 />
                 <Area 
                     type="monotone" 
@@ -721,6 +839,13 @@ export function DashboardPage() {
                     stroke={CHART_COLORS[0]} 
                     fillOpacity={1} 
                     fill="url(#colorValue)" 
+                />
+                <Line 
+                    type="monotone" 
+                    dataKey="count" 
+                    stroke={CHART_COLORS[1]} 
+                    strokeWidth={2}
+                    dot={{ fill: CHART_COLORS[1], r: 4 }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -752,7 +877,25 @@ export function DashboardPage() {
                   }}
                   formatter={(value: number | undefined) => [`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor']}
                 />
-                <Bar dataKey="value" fill={CHART_COLORS[0]} radius={[8, 8, 0, 0]} />
+                <Bar dataKey="value" fill={CHART_COLORS[0]} radius={[8, 8, 0, 0]}>
+                  <LabelList 
+                    dataKey="value" 
+                    position="top" 
+                    content={({ value }: any) => (
+                      <text 
+                        x={0} 
+                        y={0} 
+                        dy={-5} 
+                        fill={isDark ? '#d2f8f7' : '#17432a'} 
+                        fontSize={10} 
+                        fontWeight="bold" 
+                        textAnchor="middle"
+                      >
+                        {`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`}
+                      </text>
+                    )}
+                  />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -786,7 +929,25 @@ export function DashboardPage() {
                   }}
                   formatter={(value: number | undefined) => [`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor']}
                 />
-                <Bar dataKey="value" fill={CHART_COLORS[1]} radius={[8, 8, 0, 0]} />
+                <Bar dataKey="value" fill={CHART_COLORS[1]} radius={[8, 8, 0, 0]}>
+                  <LabelList 
+                    dataKey="value" 
+                    position="top" 
+                    content={({ value }: any) => (
+                      <text 
+                        x={0} 
+                        y={0} 
+                        dy={-5} 
+                        fill={isDark ? '#d2f8f7' : '#17432a'} 
+                        fontSize={10} 
+                        fontWeight="bold" 
+                        textAnchor="middle"
+                      >
+                        {`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`}
+                      </text>
+                    )}
+                  />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -817,7 +978,132 @@ export function DashboardPage() {
                   }}
                   formatter={(value: number | undefined) => [`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor']}
                 />
-                <Bar dataKey="value" fill={CHART_COLORS[2]} radius={[8, 8, 0, 0]} />
+                <Bar dataKey="value" fill={CHART_COLORS[2]} radius={[8, 8, 0, 0]}>
+                  <LabelList 
+                    dataKey="value" 
+                    position="top" 
+                    content={({ value }: any) => (
+                      <text 
+                        x={0} 
+                        y={0} 
+                        dy={-5} 
+                        fill={isDark ? '#d2f8f7' : '#17432a'} 
+                        fontSize={10} 
+                        fontWeight="bold" 
+                        textAnchor="middle"
+                      >
+                        {`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`}
+                      </text>
+                    )}
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
+      
+      {/* Novos Gráficos: Clientes com Reincidência e Motivos por Rede */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Top 5 Clientes com Reincidência</CardTitle>
+            <CardDescription>Clientes com mais notas em TRATATIVA DE ANULAÇÃO e ANULADA/CANCELADA</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={clientesReincidencia}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
+                <XAxis 
+                  dataKey="name" 
+                  height={60}
+                  tick={<CustomXAxisTick />}
+                />
+                <YAxis className="text-[10px] font-bold" />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'var(--card)', 
+                    borderRadius: '8px', 
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                    fontSize: '11px',
+                    fontWeight: 'bold'
+                  }}
+                  formatter={(value: number | undefined) => [`${value} nota(s)`, 'Quantidade']}
+                />
+                <Bar dataKey="count" fill={CHART_COLORS[3]} radius={[8, 8, 0, 0]}>
+                  <LabelList 
+                    dataKey="count" 
+                    position="top" 
+                    content={({ value }: any) => (
+                      <text 
+                        x={0} 
+                        y={0} 
+                        dy={-5} 
+                        fill={isDark ? '#d2f8f7' : '#17432a'} 
+                        fontSize={10} 
+                        fontWeight="bold" 
+                        textAnchor="middle"
+                      >
+                        {`${value || 0}`}
+                      </text>
+                    )}
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader>
+            <CardTitle>Motivos Mais Recorrentes por Rede</CardTitle>
+            <CardDescription>Principais motivos de devolução por rede (Top 5 redes)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={motivosPorRede} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
+                <XAxis type="number" className="text-[10px] font-bold" />
+                <YAxis 
+                  type="category" 
+                  dataKey="rede" 
+                  width={100}
+                  tick={<CustomXAxisTick />}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'var(--card)', 
+                    borderRadius: '8px', 
+                    border: '1px solid var(--border)',
+                    color: 'var(--foreground)',
+                    fontSize: '11px',
+                    fontWeight: 'bold'
+                  }}
+                  formatter={(value: number | undefined, payload: any) => [
+                    `${value} ocorrência(s) - Motivo: ${payload.motivo}`,
+                    'Quantidade'
+                  ]}
+                />
+                <Bar dataKey="count" fill={CHART_COLORS[4]} radius={[0, 8, 8, 0]}>
+                  <LabelList 
+                    dataKey="count" 
+                    position="right" 
+                    content={({ value }: any) => (
+                      <text 
+                        x={0} 
+                        y={0} 
+                        dx={5} 
+                        fill={isDark ? '#d2f8f7' : '#17432a'} 
+                        fontSize={10} 
+                        fontWeight="bold" 
+                        textAnchor="start"
+                      >
+                        {`${value || 0}`}
+                      </text>
+                    )}
+                  />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -858,7 +1144,25 @@ export function DashboardPage() {
                     return [val, nameStr];
                   }}
                 />
-                <Bar yAxisId="left" dataKey="value" fill={CHART_COLORS[0]} radius={[8, 8, 0, 0]} />
+                <Bar yAxisId="left" dataKey="value" fill={CHART_COLORS[0]} radius={[8, 8, 0, 0]}>
+                  <LabelList 
+                    dataKey="value" 
+                    position="top" 
+                    content={({ value }: any) => (
+                      <text 
+                        x={0} 
+                        y={0} 
+                        dy={-5} 
+                        fill={isDark ? '#d2f8f7' : '#17432a'} 
+                        fontSize={10} 
+                        fontWeight="bold" 
+                        textAnchor="middle"
+                      >
+                        {`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`}
+                      </text>
+                    )}
+                  />
+                </Bar>
                 <Line yAxisId="right" type="monotone" dataKey="percentage" stroke={CHART_COLORS[3]} strokeWidth={2} />
               </ComposedChart>
             </ResponsiveContainer>
@@ -910,20 +1214,27 @@ export function DashboardPage() {
                     <tr key={idx}>
                       <td className="border p-2 font-medium text-xs">{row.produto.length > 20 ? row.produto.substring(0, 20) + '...' : row.produto}</td>
                       {Object.keys(row).filter(k => k !== 'produto').map(rede => {
-                        const value = row[rede] || 0;
-                        const maxValue = Math.max(...heatmapData.map(r => Math.max(...Object.keys(r).filter(k => k !== 'produto').map(k => r[k] || 0))));
+                        const data = row[rede] || { quantidade: 0, unidade: 'UN' };
+                        const value = typeof data === 'object' ? data.quantidade : data;
+                        const unidade = typeof data === 'object' ? data.unidade : 'UN';
+                        const maxValue = Math.max(...heatmapData.map(r => {
+                          return Math.max(...Object.keys(r).filter(k => k !== 'produto').map(k => {
+                            const cellData = r[k];
+                            return typeof cellData === 'object' ? cellData.quantidade : cellData || 0;
+                          }));
+                        }));
                         const intensity = maxValue > 0 ? (value / maxValue) * 100 : 0;
                         return (
                           <td 
                             key={rede} 
                             className="border p-2 text-center text-xs"
                             style={{ 
-                              backgroundColor: intensity > 0 ? `rgba(7, 62, 41, ${intensity / 100})` : 'transparent',
-                              color: intensity > 50 ? 'white' : 'inherit'
+                              backgroundColor: intensity > 0 ? (isDark ? `rgba(210, 248, 247, ${intensity / 100})` : `rgba(23, 67, 42, ${intensity / 100})`) : 'transparent',
+                              color: intensity > 50 ? (isDark ? '#000' : '#fff') : 'inherit'
                             }}
-                            title={`${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} unidades`}
+                            title={`${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${unidade}`}
                           >
-                            {value > 0 ? `${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} qtde` : '-'}
+                            {value > 0 ? `${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${unidade}` : '-'}
                           </td>
                         );
                       })}
@@ -1130,26 +1441,59 @@ export function DashboardPage() {
               </CardContent>
           </Card>
 
-          {/* Produtos Críticos - Implementado */}
+          {/* Produtos Críticos - Separado em CX e UN */}
           <Card className="col-span-1">
               <CardHeader>
                   <CardTitle className="text-base">Produtos Críticos</CardTitle>
               </CardHeader>
               <CardContent>
                   {topProdutos.length > 0 ? (
-                      <div className="space-y-3 max-h-[250px] overflow-y-auto">
-                          {topProdutos.map((produto, i) => (
-                              <div key={i} className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
-                                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                                      <span className="text-xs font-bold text-muted-foreground w-6">{i + 1}º</span>
-                                      <span className="text-sm font-medium truncate" title={produto.nameFull || produto.name}>{produto.name}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                      <span className="text-sm font-bold">{produto.quantidade.toFixed(2)}</span>
-                                      <span className="text-xs text-muted-foreground">qtde</span>
-                                  </div>
+                      <div className="space-y-4 max-h-[400px] overflow-y-auto">
+                          {/* Top 5 em CX - SEMPRE MOSTRAR, mesmo que vazio */}
+                          <div>
+                              <h4 className="text-xs font-bold text-muted-foreground mb-2">Top 5 em CX</h4>
+                              <div className="space-y-2">
+                                  {topProdutos.filter(p => p.tipo === 'CX').length > 0 ? (
+                                      topProdutos.filter(p => p.tipo === 'CX').map((produto, i) => (
+                                          <div key={`cx-${i}`} className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
+                                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                  <span className="text-xs font-bold text-muted-foreground w-6">{i + 1}º</span>
+                                                  <span className="text-sm font-medium truncate" title={produto.nameFull || produto.name}>{produto.name}</span>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                  <span className="text-sm font-bold">{produto.quantidade.toFixed(2)}</span>
+                                                  <span className="text-xs text-muted-foreground">{produto.unidade || 'CX'}</span>
+                                              </div>
+                                          </div>
+                                      ))
+                                  ) : (
+                                      <div className="text-xs text-muted-foreground p-2">Nenhum produto em CX encontrado</div>
+                                  )}
                               </div>
-                          ))}
+                          </div>
+                          
+                          {/* Top 5 em UN - SEMPRE MOSTRAR, mesmo que vazio */}
+                          <div>
+                              <h4 className="text-xs font-bold text-muted-foreground mb-2">Top 5 em UN</h4>
+                              <div className="space-y-2">
+                                  {topProdutos.filter(p => p.tipo === 'UN').length > 0 ? (
+                                      topProdutos.filter(p => p.tipo === 'UN').map((produto, i) => (
+                                          <div key={`un-${i}`} className="flex items-center justify-between p-2 rounded hover:bg-muted/50">
+                                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                  <span className="text-xs font-bold text-muted-foreground w-6">{i + 1}º</span>
+                                                  <span className="text-sm font-medium truncate" title={produto.nameFull || produto.name}>{produto.name}</span>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                  <span className="text-sm font-bold">{produto.quantidade.toFixed(2)}</span>
+                                                  <span className="text-xs text-muted-foreground">{produto.unidade || 'UN'}</span>
+                                              </div>
+                                          </div>
+                                      ))
+                                  ) : (
+                                      <div className="text-xs text-muted-foreground p-2">Nenhum produto em UN encontrado</div>
+                                  )}
+                              </div>
+                          </div>
                       </div>
                   ) : (
                       <div className="flex flex-col items-center justify-center h-[250px] text-muted-foreground text-center p-4">

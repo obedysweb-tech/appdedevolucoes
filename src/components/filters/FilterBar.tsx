@@ -46,149 +46,147 @@ export function FilterBar() {
 
   return (
     <div className="w-full bg-card border-b p-4 space-y-4">
-      <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+      {/* Search Bar - Full Width */}
+      <div className="relative w-full">
+        <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input 
+          placeholder="Buscar por cliente, vendedor, cidade..." 
+          className="pl-8" 
+          value={filters.search || ''}
+          onChange={(e) => setFilters({ search: e.target.value })}
+        />
+      </div>
+
+      {/* Filters Grid - Responsive */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
+        {/* Resultado Filter */}
+        <Select 
+            value={filters.resultado?.[0] || 'all'} 
+            onValueChange={(val) => setFilters({ resultado: val === 'all' ? undefined : [val] })}
+        >
+            <SelectTrigger className="w-full">
+                <SelectValue placeholder="Resultado" />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value="all">Todos os Resultados</SelectItem>
+                <SelectItem value="PENDENTE VALIDAÇÃO">PENDENTE VALIDAÇÃO</SelectItem>
+                <SelectItem value="VALIDADA">VALIDADA</SelectItem>
+                <SelectItem value="LANÇADA">LANÇADA</SelectItem>
+                <SelectItem value="TRATATIVA DE ANULAÇÃO">TRATATIVA DE ANULAÇÃO</SelectItem>
+                <SelectItem value="ANULADA/CANCELADA">ANULADA/CANCELADA</SelectItem>
+            </SelectContent>
+        </Select>
+
+        {/* Motivo Filter */}
+        <Select 
+            value={filters.motivo?.[0] || 'all'} 
+            onValueChange={(val) => setFilters({ motivo: val === 'all' ? undefined : [val] })}
+        >
+            <SelectTrigger className="w-full">
+                <SelectValue placeholder="Motivo" />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value="all">Todos os Motivos</SelectItem>
+                {motivos.map(m => (
+                    <SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>
+                ))}
+            </SelectContent>
+        </Select>
+
+        {/* Cliente Filter */}
+        <Select 
+            value={filters.cliente?.[0] || 'all'} 
+            onValueChange={(val) => setFilters({ cliente: val === 'all' ? undefined : [val] })}
+        >
+            <SelectTrigger className="w-full">
+                <SelectValue placeholder="Cliente" />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value="all">Todos os Clientes</SelectItem>
+                {clientes.slice(0, 100).map((c, i) => (
+                    <SelectItem key={i} value={c.nome}>{c.nome}</SelectItem>
+                ))}
+            </SelectContent>
+        </Select>
+
+        {/* Vendedor Filter */}
+        <Select 
+            value={filters.vendedor?.[0] || 'all'} 
+            onValueChange={(val) => setFilters({ vendedor: val === 'all' ? undefined : [val] })}
+        >
+            <SelectTrigger className="w-full">
+                <SelectValue placeholder="Vendedor" />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value="all">Todos os Vendedores</SelectItem>
+                {vendedores.map(v => (
+                    <SelectItem key={v} value={v}>{v}</SelectItem>
+                ))}
+            </SelectContent>
+        </Select>
         
-        {/* Search */}
-        <div className="relative w-full md:w-1/3">
-          <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Buscar por cliente, vendedor, cidade..." 
-            className="pl-8" 
-            value={filters.search || ''}
-            onChange={(e) => setFilters({ search: e.target.value })}
-          />
-        </div>
+        {/* Sector Filter */}
+        <Select 
+            value={filters.setor?.[0] || 'all'} 
+            onValueChange={(val) => setFilters({ setor: val === 'all' ? undefined : [val] })}
+        >
+            <SelectTrigger className="w-full">
+                <Layers className="mr-2 h-4 w-4 text-muted-foreground" />
+                <SelectValue placeholder="Setor" />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value="all">Todos os Setores</SelectItem>
+                {sectors.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                ))}
+            </SelectContent>
+        </Select>
 
-        {/* Filters Group */}
-        <div className="flex flex-wrap gap-2 items-center w-full md:w-auto">
-            
-            {/* Resultado Filter */}
-            <Select 
-                value={filters.resultado?.[0] || 'all'} 
-                onValueChange={(val) => setFilters({ resultado: val === 'all' ? undefined : [val] })}
-            >
-                <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Resultado" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="all">Todos os Resultados</SelectItem>
-                    <SelectItem value="PENDENTE VALIDAÇÃO">PENDENTE VALIDAÇÃO</SelectItem>
-                    <SelectItem value="VALIDADA">VALIDADA</SelectItem>
-                    <SelectItem value="LANÇADA">LANÇADA</SelectItem>
-                    <SelectItem value="TRATATIVA DE ANULAÇÃO">TRATATIVA DE ANULAÇÃO</SelectItem>
-                    <SelectItem value="ANULADA/CANCELADA">ANULADA/CANCELADA</SelectItem>
-                </SelectContent>
-            </Select>
+        {/* Period Select */}
+        <Select 
+            value={filters.period} 
+            onValueChange={(val: any) => setFilters({ period: val })}
+        >
+            <SelectTrigger className="w-full">
+                <SelectValue placeholder="Período" />
+            </SelectTrigger>
+            <SelectContent>
+                <SelectItem value="TODAY">Hoje</SelectItem>
+                <SelectItem value="YESTERDAY">Ontem</SelectItem>
+                <SelectItem value="THIS_WEEK">Esta Semana</SelectItem>
+                <SelectItem value="LAST_WEEK">Semana Passada</SelectItem>
+                <SelectItem value="THIS_MONTH">Mês Atual</SelectItem>
+                <SelectItem value="LAST_MONTH">Mês Anterior</SelectItem>
+                <SelectItem value="THIS_QUARTER">Trimestre Atual</SelectItem>
+                <SelectItem value="THIS_SEMESTER">Semestre Atual</SelectItem>
+                <SelectItem value="THIS_YEAR">Ano Atual</SelectItem>
+            </SelectContent>
+        </Select>
+      </div>
 
-            {/* Motivo Filter */}
-            <Select 
-                value={filters.motivo?.[0] || 'all'} 
-                onValueChange={(val) => setFilters({ motivo: val === 'all' ? undefined : [val] })}
-            >
-                <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Motivo" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="all">Todos os Motivos</SelectItem>
-                    {motivos.map(m => (
-                        <SelectItem key={m.id} value={m.id}>{m.nome}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
+      {/* Date Picker and Clear Button Row */}
+      <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between">
+        <Popover>
+            <PopoverTrigger asChild>
+                <Button variant="outline" className={cn("w-full sm:w-[200px] justify-start text-left font-normal", !date && "text-muted-foreground")}>
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {date ? format(date, "dd/MM/yyyy") : <span>Data Específica</span>}
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                    mode="single"
+                    selected={date}
+                    onSelect={(d) => { setDate(d); setFilters({ startDate: d }); }}
+                    initialFocus
+                />
+            </PopoverContent>
+        </Popover>
 
-            {/* Cliente Filter */}
-            <Select 
-                value={filters.cliente?.[0] || 'all'} 
-                onValueChange={(val) => setFilters({ cliente: val === 'all' ? undefined : [val] })}
-            >
-                <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Cliente" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="all">Todos os Clientes</SelectItem>
-                    {clientes.slice(0, 100).map((c, i) => (
-                        <SelectItem key={i} value={c.nome}>{c.nome}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-
-            {/* Vendedor Filter */}
-            <Select 
-                value={filters.vendedor?.[0] || 'all'} 
-                onValueChange={(val) => setFilters({ vendedor: val === 'all' ? undefined : [val] })}
-            >
-                <SelectTrigger className="w-[160px]">
-                    <SelectValue placeholder="Vendedor" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="all">Todos os Vendedores</SelectItem>
-                    {vendedores.map(v => (
-                        <SelectItem key={v} value={v}>{v}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-            
-            {/* Sector Filter */}
-            <Select 
-                value={filters.setor?.[0] || 'all'} 
-                onValueChange={(val) => setFilters({ setor: val === 'all' ? undefined : [val] })}
-            >
-                <SelectTrigger className="w-[160px]">
-                    <Layers className="mr-2 h-4 w-4 text-muted-foreground" />
-                    <SelectValue placeholder="Setor" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="all">Todos os Setores</SelectItem>
-                    {sectors.map(s => (
-                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-
-            {/* Period Select */}
-            <Select 
-                value={filters.period} 
-                onValueChange={(val: any) => setFilters({ period: val })}
-            >
-                <SelectTrigger className="w-[160px]">
-                    <SelectValue placeholder="Período" />
-                </SelectTrigger>
-                <SelectContent>
-                    <SelectItem value="TODAY">Hoje</SelectItem>
-                    <SelectItem value="YESTERDAY">Ontem</SelectItem>
-                    <SelectItem value="THIS_WEEK">Esta Semana</SelectItem>
-                    <SelectItem value="LAST_WEEK">Semana Passada</SelectItem>
-                    <SelectItem value="THIS_MONTH">Mês Atual</SelectItem>
-                    <SelectItem value="LAST_MONTH">Mês Anterior</SelectItem>
-                    <SelectItem value="THIS_QUARTER">Trimestre Atual</SelectItem>
-                    <SelectItem value="THIS_SEMESTER">Semestre Atual</SelectItem>
-                    <SelectItem value="THIS_YEAR">Ano Atual</SelectItem>
-                </SelectContent>
-            </Select>
-
-            {/* Date Range Picker (Simplified as Single Date for UI demo) */}
-            <Popover>
-                <PopoverTrigger asChild>
-                    <Button variant="outline" className={cn("w-[200px] justify-start text-left font-normal", !date && "text-muted-foreground")}>
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {date ? format(date, "dd/MM/yyyy") : <span>Data Específica</span>}
-                    </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                        mode="single"
-                        selected={date}
-                        onSelect={(d) => { setDate(d); setFilters({ startDate: d }); }}
-                        initialFocus
-                    />
-                </PopoverContent>
-            </Popover>
-
-            {/* Clear Filters */}
-            <Button variant="ghost" size="icon" onClick={() => { resetFilters(); setDate(undefined); }}>
-                <FilterX className="h-4 w-4" />
-            </Button>
-        </div>
+        <Button variant="ghost" size="sm" onClick={() => { resetFilters(); setDate(undefined); }} className="w-full sm:w-auto">
+            <FilterX className="mr-2 h-4 w-4" />
+            Limpar Filtros
+        </Button>
       </div>
 
       {/* Active Filters Badges */}

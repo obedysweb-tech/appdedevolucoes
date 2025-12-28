@@ -612,7 +612,7 @@ Cada log contém:
   - Email (único)
   - Senha
   - Nome
-  - Perfil (ADMIN, GESTOR, COMERCIAL, LOGISTICA, VENDEDOR)
+  - Perfil (ADMIN, GESTOR, COMERCIAL, LOGISTICA, VENDEDOR, NOVO)
   - Vendedor (se perfil for VENDEDOR)
 - **Editar Usuário:** Alteração de qualquer campo
   - Nome

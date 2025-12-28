@@ -89,11 +89,17 @@ function RoleProtectedRoute({
     return <Navigate to="/login" replace />;
   }
   
+  // Usuário sem role ou tipo NOVO só pode acessar perfil
+  if (!user.role || user.role === 'NOVO') {
+    console.warn(`🚫 Acesso negado: usuário ${user.email} (${user.role || 'sem role'}) tentou acessar rota protegida`);
+    return <Navigate to="/profile" replace />;
+  }
+  
   const userRole = typeof user.role === 'string' ? user.role.toUpperCase() : user.role;
   
   if (!allowedRoles.includes(userRole as any)) {
     console.warn(`🚫 Acesso negado: usuário ${user.email} (${userRole}) tentou acessar rota permitida apenas para:`, allowedRoles);
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/profile" replace />;
   }
   
   return <>{children}</>;
@@ -132,7 +138,7 @@ function App() {
       id: string;
       email: string;
       name: string;
-      role: 'GESTOR' | 'COMERCIAL' | 'LOGISTICA' | 'ADMIN' | 'VENDEDOR';
+      role: 'GESTOR' | 'COMERCIAL' | 'LOGISTICA' | 'ADMIN' | 'VENDEDOR' | 'NOVO' | null;
       avatar_url?: string;
       vendedor?: string | null;
     }> => {
@@ -168,19 +174,21 @@ function App() {
         
         if (data && !error) {
           // Garantir que o role seja uma string válida e em maiúsculas
-          let role: 'GESTOR' | 'COMERCIAL' | 'LOGISTICA' | 'ADMIN' | 'VENDEDOR' = 'COMERCIAL';
+          let role: 'GESTOR' | 'COMERCIAL' | 'LOGISTICA' | 'ADMIN' | 'VENDEDOR' | 'NOVO' = 'NOVO';
           
           if (data.role) {
             const roleStr = String(data.role).trim().toUpperCase();
             console.log('📋 Role processado:', roleStr);
             
-            if (['GESTOR', 'COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR'].includes(roleStr)) {
-              role = roleStr as 'GESTOR' | 'COMERCIAL' | 'LOGISTICA' | 'ADMIN' | 'VENDEDOR';
+            if (['GESTOR', 'COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR', 'NOVO'].includes(roleStr)) {
+              role = roleStr as 'GESTOR' | 'COMERCIAL' | 'LOGISTICA' | 'ADMIN' | 'VENDEDOR' | 'NOVO';
             } else {
-              console.warn('⚠️ Role inválido no banco:', roleStr, '- usando COMERCIAL');
+              console.warn('⚠️ Role inválido no banco:', roleStr, '- usando NOVO');
+              role = 'NOVO';
             }
           } else {
-            console.warn('⚠️ Role está vazio no banco - usando COMERCIAL');
+            console.warn('⚠️ Role está vazio no banco - usando NOVO');
+            role = 'NOVO';
           }
           
           profileFromDb = {
@@ -211,9 +219,9 @@ function App() {
         
         if (!authError && authUser?.user) {
           const metadataRole = authUser.user.user_metadata?.role;
-          const fallbackRole = (metadataRole && ['GESTOR', 'COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR'].includes(String(metadataRole).toUpperCase()))
-            ? String(metadataRole).toUpperCase() as 'GESTOR' | 'COMERCIAL' | 'LOGISTICA' | 'ADMIN' | 'VENDEDOR'
-            : 'COMERCIAL';
+          const fallbackRole = (metadataRole && ['GESTOR', 'COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR', 'NOVO'].includes(String(metadataRole).toUpperCase()))
+            ? String(metadataRole).toUpperCase() as 'GESTOR' | 'COMERCIAL' | 'LOGISTICA' | 'ADMIN' | 'VENDEDOR' | 'NOVO'
+            : 'NOVO';
           
           const fallback = {
             id: userId,
@@ -231,17 +239,17 @@ function App() {
         console.warn('⚠️ Erro ao buscar metadata:', err);
       }
       
-      // Fallback 2 (FINAL): Perfil mínimo com COMERCIAL
+      // Fallback 2 (FINAL): Perfil mínimo com NOVO
       // IMPORTANTE: Sempre retornar um perfil válido para não travar o app
       // Não tentar mais queries do banco aqui para evitar mais timeouts
       const fallback = {
         id: userId,
         email,
         name: email.split('@')[0],
-        role: 'COMERCIAL' as const,
+        role: 'NOVO' as const,
         vendedor: null
       };
-      console.log('⚠️ Usando fallback final (COMERCIAL) - query do banco falhou:', fallback);
+      console.log('⚠️ Usando fallback final (NOVO) - query do banco falhou:', fallback);
       return fallback;
     };
 
@@ -295,7 +303,7 @@ function App() {
                   id: session.user.id,
                   email: session.user.email!,
                   name: session.user.email!.split('@')[0],
-                  role: 'COMERCIAL' as const,
+                  role: 'NOVO' as const,
                   vendedor: null
                 });
               }
@@ -334,7 +342,7 @@ function App() {
             id: session.user.id,
             email: session.user.email!,
             name: session.user.email!.split('@')[0],
-            role: 'COMERCIAL' as const,
+            role: 'NOVO' as const,
             vendedor: null
           };
           console.log('⚠️ Usando perfil mínimo devido a erro:', fallbackProfile);
@@ -368,7 +376,7 @@ function App() {
                 id: session.user.id,
                 email: session.user.email!,
                 name: session.user.email!.split('@')[0],
-                role: 'COMERCIAL' as const,
+                role: 'NOVO' as const,
                 vendedor: null
               });
             }, 3000);
@@ -399,7 +407,7 @@ function App() {
             id: session.user.id,
             email: session.user.email!,
             name: session.user.email!.split('@')[0],
-            role: 'COMERCIAL' as const,
+            role: 'NOVO' as const,
             vendedor: null
           };
           console.log('⚠️ Usando perfil mínimo devido a erro:', fallbackProfile);

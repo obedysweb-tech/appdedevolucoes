@@ -59,13 +59,14 @@ export function LoginPage() {
         }
       } else {
         // --- CADASTRO (SIGN UP) ---
+        // NOVO USUÁRIO SEM ROLE - apenas admin pode atribuir role depois
         const { data: authData, error: authError } = await supabase.auth.signUp({
           email: cleanEmail,
           password,
           options: {
             data: {
-              name: name,
-              role: 'ADMIN' // Criando como ADMIN para facilitar seu teste
+              name: name
+              // NÃO incluir role - novo usuário não terá role até admin atribuir
             }
           }
         });

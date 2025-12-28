@@ -73,6 +73,11 @@ export function Sidebar({ className, isOpen = false, onClose }: SidebarProps) {
     },
   ];
 
+  // Se usuário não tem role ou é tipo NOVO, não mostrar nenhuma rota (só perfil)
+  if (!user.role || user.role === 'NOVO') {
+    return null; // Usuário sem role ou tipo NOVO não vê sidebar
+  }
+  
   // Garantir que o role seja sempre uma string em maiúsculas para comparação
   const userRole = typeof user.role === 'string' ? user.role.toUpperCase() : user.role;
   console.log('Sidebar - Filtrando rotas com role:', userRole);

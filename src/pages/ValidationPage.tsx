@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, AlertCircle, Save, ArrowUpDown, ArrowUp, ArrowDown, FileText, Trash2, Edit, Share2, CheckSquare, Square, X } from "lucide-react";
+import { Loader2, AlertCircle, Save, ArrowUpDown, ArrowUp, ArrowDown, FileText, Trash2, Edit, Share2, CheckSquare, Square, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -85,6 +85,8 @@ export function ValidationPage() {
   const [stats, setStats] = useState({
     nfPendentes: 0,
     totalPendente: 0,
+    nfValidadas: 0,
+    totalValidadas: 0,
     nfCancelamento: 0,
     totalCancelamento: 0,
     nfAtraso: 0,
@@ -230,8 +232,15 @@ export function ValidationPage() {
         toast.error("Erro ao carregar devoluções");
         console.error(error);
     } else if (devolucoes) {
+        // Filtrar notas: mostrar apenas PENDENTE VALIDAÇÃO, VALIDADA e TRATATIVA DE ANULAÇÃO
+        // LANÇADA e ANULADA/CANCELADA vão para a tela de Relatórios
+        const devolucoesFiltradas = devolucoes.filter((d: any) => {
+          return d.resultado === 'PENDENTE VALIDAÇÃO' || 
+                 d.resultado === 'VALIDADA' ||
+                 d.resultado === 'TRATATIVA DE ANULAÇÃO';
+        });
         // Buscar dados dos clientes baseado no CNPJ para preencher nome, vendedor e rede
-        const cnpjs = devolucoes
+        const cnpjs = devolucoesFiltradas
           .map(d => d.cnpj_destinatario)
           .filter(cnpj => cnpj && cnpj.trim() !== '');
         
@@ -250,7 +259,7 @@ export function ValidationPage() {
         }
 
         // Buscar logs de validação para obter nomes dos usuários validadores
-        const devolucaoIds = devolucoes.map(d => d.id);
+        const devolucaoIds = devolucoesFiltradas.map(d => d.id);
         let validadoresMap = new Map<string, string>();
         
         if (devolucaoIds.length > 0) {
@@ -295,14 +304,22 @@ export function ValidationPage() {
           }
         }
         
-        const formattedData = devolucoes.map((item: any) => {
+        const formattedData = devolucoesFiltradas.map((item: any) => {
           const cliente = clientesMap.get(item.cnpj_destinatario);
           
-          // Processar itens para incluir motivo
-          const itensProcessados = item.itens?.map((prod: any) => ({
-            ...prod,
-            motivo_nome: prod.motivo_item?.nome || '-'
-          }));
+          // Processar itens para incluir motivo (preservar motivo_id do banco)
+          const itensProcessados = item.itens?.map((prod: any) => {
+            // Garantir que o id está presente
+            if (!prod.id) {
+              console.warn('Item sem ID:', prod);
+            }
+            return {
+              ...prod,
+              id: prod.id, // Garantir que o id está presente
+              motivo_id: prod.motivo_id || null, // Preservar motivo_id do banco
+              motivo_nome: prod.motivo_item?.nome || '-'
+            };
+          });
           
           // Buscar nome do validador baseado no resultado atual
           const resultado = item.resultado || 'PENDENTE VALIDAÇÃO';
@@ -313,6 +330,26 @@ export function ValidationPage() {
             nomeValidador = validadoresMap.get(key) || '-';
           }
           
+          // Calcular prazo baseado no resultado
+          let prazoCalculado = item.prazo;
+          if (resultado === 'LANÇADA' || resultado === 'ANULADA/CANCELADA') {
+            prazoCalculado = 'FINALIZADO';
+          } else if (resultado === 'TRATATIVA DE ANULAÇÃO') {
+            prazoCalculado = 'TRATANDO';
+          } else if (resultado === 'VALIDADA') {
+            prazoCalculado = 'CONCLUIDO';
+          } else if (resultado === 'PENDENTE VALIDAÇÃO') {
+            // Regra de prazo: dias >= 3 = EM ATRASO, dias < 3 = NO PRAZO
+            const dias = item.dias;
+            if (dias !== null && dias !== undefined) {
+              if (dias >= 3) {
+                prazoCalculado = 'EM ATRASO';
+              } else {
+                prazoCalculado = 'NO PRAZO';
+              }
+            }
+          }
+          
           return {
             ...item,
             setor: item.setores?.nome,
@@ -321,6 +358,7 @@ export function ValidationPage() {
             resultado: resultado,
             itens: itensProcessados,
             nome_validador: nomeValidador,
+            prazo: prazoCalculado,
             // Preencher com dados do cliente se encontrado
             nome_cliente: cliente?.nome || item.nome_cliente || 'Cliente não encontrado',
             vendedor: cliente?.vendedor || item.vendedor || '-',
@@ -352,6 +390,11 @@ export function ValidationPage() {
           .filter(d => d.resultado === 'PENDENTE VALIDAÇÃO')
           .reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
         
+        const nfValidadas = sortedDefault.filter(d => d.resultado === 'VALIDADA').length;
+        const totalValidadas = sortedDefault
+          .filter(d => d.resultado === 'VALIDADA')
+          .reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
+        
         const nfCancelamento = sortedDefault.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO').length;
         const totalCancelamento = sortedDefault
           .filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO')
@@ -365,6 +408,8 @@ export function ValidationPage() {
         setStats({
           nfPendentes,
           totalPendente,
+          nfValidadas,
+          totalValidadas,
           nfCancelamento,
           totalCancelamento,
           nfAtraso,
@@ -497,10 +542,41 @@ export function ValidationPage() {
       const novoResultado = getProximoResultado(resultadoAtualTyped);
 
       try {
-        // 1. Atualizar Resultado
+        // Calcular prazo baseado no novo resultado
+        let novoPrazo = null;
+        if (novoResultado === 'LANÇADA' || novoResultado === 'ANULADA/CANCELADA') {
+          novoPrazo = 'FINALIZADO';
+        } else if (novoResultado === 'TRATATIVA DE ANULAÇÃO') {
+          novoPrazo = 'TRATANDO';
+        } else if (novoResultado === 'VALIDADA') {
+          novoPrazo = 'CONCLUIDO';
+        } else if (novoResultado === 'PENDENTE VALIDAÇÃO') {
+          // Manter cálculo baseado em dias (será recalculado no fetch)
+          novoPrazo = null;
+        }
+        
+        // 1. Atualizar Resultado, Prazo, Validada Por e Finalizada Por
+        const updateData: any = { resultado: novoResultado };
+        if (novoPrazo) {
+          updateData.prazo = novoPrazo;
+        }
+        
+        const nomeUsuario = user.name || user.email || '-';
+        
+        // Salvar validada_por para VALIDADA ou TRATATIVA DE ANULAÇÃO
+        if (novoResultado === 'VALIDADA' || novoResultado === 'TRATATIVA DE ANULAÇÃO') {
+          updateData.nome_validador = nomeUsuario;
+        }
+        
+        // Salvar finalizada_por e data_finalizacao para LANÇADA ou ANULADA/CANCELADA
+        if (novoResultado === 'LANÇADA' || novoResultado === 'ANULADA/CANCELADA') {
+          updateData.finalizada_por = nomeUsuario;
+          updateData.data_finalizacao = new Date().toISOString();
+        }
+        
         const { error: updateError } = await supabase
             .from('devolucoes')
-            .update({ resultado: novoResultado })
+            .update(updateData)
             .eq('id', id);
         
         if (updateError) throw updateError;
@@ -520,20 +596,39 @@ export function ValidationPage() {
 
         toast.success(`Resultado alterado para: ${novoResultado}`);
         
-        // Atualizar apenas o item específico na lista local sem recarregar tudo
-        const updateItem = (item: any) => {
-          if (item.id === id) {
-            return {
-              ...item,
-              resultado: novoResultado,
-              nome_validador: novoResultado !== 'PENDENTE VALIDAÇÃO' ? (user.name || user.email || '-') : '-'
-            };
-          }
-          return item;
-        };
+        // Calcular prazo para atualização local
+        let prazoLocal = null;
+        if (novoResultado === 'LANÇADA' || novoResultado === 'ANULADA/CANCELADA') {
+          prazoLocal = 'FINALIZADO';
+        } else if (novoResultado === 'TRATATIVA DE ANULAÇÃO') {
+          prazoLocal = 'TRATANDO';
+        } else if (novoResultado === 'VALIDADA') {
+          prazoLocal = 'CONCLUIDO';
+        }
         
-        setData(prevData => prevData.map(updateItem));
-        setAllData(prevData => prevData.map(updateItem));
+        // Se o novo resultado for LANÇADA ou ANULADA/CANCELADA, remover da lista (vai para Relatórios)
+        // VALIDADA e TRATATIVA DE ANULAÇÃO continuam na tela de validação
+        if (novoResultado === 'LANÇADA' || novoResultado === 'ANULADA/CANCELADA') {
+          // Remover o item das listas locais
+          setData(prevData => prevData.filter(item => item.id !== id));
+          setAllData(prevData => prevData.filter(item => item.id !== id));
+        } else {
+          // Atualizar apenas o item específico na lista local
+          const updateItem = (item: any) => {
+            if (item.id === id) {
+              return {
+                ...item,
+                resultado: novoResultado,
+                nome_validador: novoResultado !== 'PENDENTE VALIDAÇÃO' ? (user.name || user.email || '-') : '-',
+                prazo: prazoLocal || item.prazo
+              };
+            }
+            return item;
+          };
+          
+          setData(prevData => prevData.map(updateItem));
+          setAllData(prevData => prevData.map(updateItem));
+        }
 
       } catch (error: any) {
           toast.error("Erro ao processar: " + error.message);
@@ -573,12 +668,14 @@ export function ValidationPage() {
         }
       }
 
-      // Depois de atualizar todos os produtos, atualizar motivo e resultado para VALIDADA
+      // Depois de atualizar todos os produtos, atualizar motivo, resultado para VALIDADA, prazo CONCLUIDO e nome_validador
       const { error: updateError } = await supabase
           .from('devolucoes')
           .update({ 
             motivo_id: motivoId,
-            resultado: 'VALIDADA'
+            resultado: 'VALIDADA',
+            prazo: 'CONCLUIDO',
+            nome_validador: user.name || user.email || '-'
           })
           .eq('id', id);
       
@@ -607,6 +704,8 @@ export function ValidationPage() {
             motivo_id: motivoId,
             resultado: 'VALIDADA',
             nome_validador: user.name || user.email || '-',
+            prazo: 'CONCLUIDO',
+            motivo: motivos.find(m => m.id === motivoId)?.nome || item.motivo,
             itens: item.itens?.map((prod: any) => ({ ...prod, motivo_id: motivoId }))
           };
         }
@@ -622,16 +721,27 @@ export function ValidationPage() {
   };
 
   const handleComentarioChange = (id: string, value: string) => {
+    // Atualizar estado local imediatamente para resposta fluida (sem validação durante digitação)
+    setComentarios(prev => ({ ...prev, [id]: value }));
+  };
+  
+  // Validação separada apenas ao salvar
+  const validateComentario = (value: string): boolean => {
     const words = countWords(value);
     if (words > 100) {
       toast.warning("Máximo de 100 palavras permitido");
-      return;
+      return false;
     }
-    setComentarios(prev => ({ ...prev, [id]: value }));
+    return true;
   };
 
   const handleSalvarComentario = async (id: string) => {
     if (!user) return;
+    
+    // Validar antes de salvar
+    if (!validateComentario(comentarios[id] || '')) {
+      return;
+    }
 
     setSavingComment(prev => ({ ...prev, [id]: true }));
 
@@ -664,199 +774,370 @@ export function ValidationPage() {
   };
 
   const handleMotivoItemChange = async (itemId: string, motivoId: string, devolucaoId: string) => {
-    if (!user) return;
+    if (!user) {
+      console.error('Usuário não autenticado');
+      return;
+    }
+
+    // Se o motivoId for vazio, não fazer nada (usuário desmarcou)
+    if (!motivoId || motivoId.trim() === '') {
+      console.log('Motivo vazio, ignorando...');
+      return;
+    }
+
+    // Validar IDs
+    if (!itemId || !devolucaoId) {
+      console.error('IDs inválidos:', { itemId, devolucaoId, tipoItemId: typeof itemId, tipoDevolucaoId: typeof devolucaoId });
+      toast.error("Erro: IDs inválidos. Verifique o console para mais detalhes.");
+      return;
+    }
+
+    // Garantir que itemId é uma string válida
+    const itemIdString = String(itemId).trim();
+    const devolucaoIdString = String(devolucaoId).trim();
+
+    if (!itemIdString || itemIdString === 'undefined' || itemIdString === 'null') {
+      console.error('itemId inválido após conversão:', { itemId, itemIdString });
+      toast.error("Erro: ID do produto inválido");
+      return;
+    }
 
     try {
-      // Atualizar motivo do item
-      const { error: itemError } = await supabase
-          .from('itens_devolucao')
-          .update({ motivo_id: motivoId })
-          .eq('id', itemId);
+      const nomeValidador = user.name || user.email || '-';
       
-      if (itemError) throw itemError;
+      console.log('Salvando motivo:', { itemId: itemIdString, motivoId, devolucaoId: devolucaoIdString });
 
-      // Buscar todos os itens desta devolução
-      const { data: todosItens, error: itensError } = await supabase
-          .from('itens_devolucao')
-          .select('id, motivo_id')
-          .eq('devolucao_id', devolucaoId);
-      
-      if (itensError) throw itensError;
+      // Verificar se o item existe antes de atualizar
+      const { data: itemExistente, error: checkError } = await supabase
+        .from('itens_devolucao')
+        .select('id, motivo_id, devolucao_id')
+        .eq('id', itemIdString)
+        .single();
 
-      // Verificar se todos os itens têm motivo
-      const todosTemMotivo = todosItens && todosItens.length > 0 && todosItens.every(item => item.motivo_id);
-
-      // Se todos têm motivo, atualizar resultado para VALIDADA e definir motivo_id na devolução
-      if (todosTemMotivo) {
-        // Calcular o motivo mais repetido ou o primeiro escolhido
-        const motivoCounts: Record<string, number> = {};
-        let primeiroMotivo: string | null = null;
-        
-        todosItens.forEach((item: any) => {
-          if (item.motivo_id) {
-            if (!primeiroMotivo) {
-              primeiroMotivo = item.motivo_id;
-            }
-            motivoCounts[item.motivo_id] = (motivoCounts[item.motivo_id] || 0) + 1;
-          }
-        });
-
-        // Encontrar o motivo mais repetido
-        let motivoMaisRepetido: string | null = primeiroMotivo;
-        let maxCount = 0;
-        
-        Object.entries(motivoCounts).forEach(([motivo, count]) => {
-          if (count > maxCount) {
-            maxCount = count;
-            motivoMaisRepetido = motivo;
-          }
-        });
-
-        // Atualizar devolução com resultado VALIDADA e motivo_id (mais repetido ou primeiro)
-        const { data: devolucao } = await supabase
-            .from('devolucoes')
-            .select('resultado, motivo_id')
-            .eq('id', devolucaoId)
-            .single();
-
-        if (devolucao && motivoMaisRepetido) {
-          const updateData: any = { resultado: 'VALIDADA' };
-          
-          // Atualizar motivo_id apenas se ainda não estiver definido ou se for diferente
-          if (!devolucao.motivo_id || devolucao.motivo_id !== motivoMaisRepetido) {
-            updateData.motivo_id = motivoMaisRepetido;
-          }
-
-          const { error: updateError } = await supabase
-              .from('devolucoes')
-              .update(updateData)
-              .eq('id', devolucaoId);
-          
-          if (updateError) {
-            console.error("Erro ao atualizar resultado e motivo:", updateError);
-            throw updateError;
-          }
-
-          // Log da Ação
-          await supabase
-              .from('logs_validacao')
-              .insert({
-                  devolucao_id: devolucaoId,
-                  usuario_id: user.id,
-                  acao: 'SELECIONAR_MOTIVO_PRODUTO',
-                  status_anterior: devolucao.resultado || 'PENDENTE VALIDAÇÃO',
-                  status_novo: 'VALIDADA'
-              });
-        }
+      if (checkError) {
+        console.error('Erro ao verificar item:', checkError);
+        toast.error("Erro: Item não encontrado no banco de dados. Verifique o console.");
+        throw checkError;
       }
 
-      // Atualizar estado local ANTES de mostrar toast
-      setData(prevData => prevData.map(item => {
-        if (item.id === devolucaoId) {
-          // Atualizar o item específico
-          const itensAtualizados = item.itens?.map((prod: any) => 
-            prod.id === itemId ? { ...prod, motivo_id: motivoId } : prod
-          );
+      if (!itemExistente) {
+        console.error('Item não encontrado:', itemIdString);
+        toast.error("Erro: Item não encontrado");
+        return;
+      }
 
-          // Recalcular se todos têm motivo usando os dados atualizados (usar variável do escopo superior)
+      console.log('Item encontrado:', itemExistente);
 
-          // Calcular motivo_id para atualizar na lista local também
-          const motivoCounts: Record<string, number> = {};
-          let primeiroMotivo: string | null = null;
-          
-          itensAtualizados?.forEach((prod: any) => {
-            if (prod.motivo_id) {
-              if (!primeiroMotivo) {
-                primeiroMotivo = prod.motivo_id;
-              }
-              motivoCounts[prod.motivo_id] = (motivoCounts[prod.motivo_id] || 0) + 1;
-            }
-          });
+      // Verificar se o item pertence à devolução correta
+      if (itemExistente.devolucao_id !== devolucaoIdString) {
+        console.error('Item não pertence à devolução:', { 
+          itemDevolucaoId: itemExistente.devolucao_id, 
+          devolucaoIdEsperado: devolucaoIdString 
+        });
+        toast.error("Erro: Item não pertence à devolução correta");
+        return;
+      }
 
-          // Encontrar o motivo mais repetido
-          let motivoMaisRepetidoLocal: string | null = primeiroMotivo;
-          let maxCount = 0;
-          
-          Object.entries(motivoCounts).forEach(([motivo, count]) => {
-            if (count > maxCount) {
-              maxCount = count;
-              motivoMaisRepetidoLocal = motivo;
-            }
-          });
+      // Atualizar motivo do item no banco de dados
+      console.log('Tentando atualizar item:', { itemIdString, motivoId });
+      
+      const { data: updatedItem, error: itemError } = await supabase
+          .from('itens_devolucao')
+          .update({ motivo_id: motivoId })
+          .eq('id', itemIdString)
+          .select('id, motivo_id');
+      
+      console.log('Resultado do update:', { updatedItem, error: itemError });
+      
+      if (itemError) {
+        console.error('Erro ao salvar motivo no Supabase:', itemError);
+        toast.error("Erro ao salvar motivo: " + itemError.message);
+        throw itemError;
+      }
 
-          // Buscar nome do motivo mais repetido
-          const motivoMaisRepetidoObj = motivos.find(m => m.id === motivoMaisRepetidoLocal);
-          const motivoNome = motivoMaisRepetidoObj?.nome || item.motivo || '-';
-
-          return {
-            ...item,
-            itens: itensAtualizados,
-            resultado: todosTemMotivo ? 'VALIDADA' : item.resultado,
-            motivo_id: todosTemMotivo && motivoMaisRepetidoLocal ? motivoMaisRepetidoLocal : item.motivo_id,
-            motivo: todosTemMotivo && motivoMaisRepetidoLocal ? motivoNome : item.motivo,
-            motivos_devolucao: todosTemMotivo && motivoMaisRepetidoLocal ? motivoMaisRepetidoObj : item.motivos_devolucao,
-            nome_validador: todosTemMotivo ? (user.name || user.email || '-') : item.nome_validador
-          };
-        }
-        return item;
-      }));
-
-      // Atualizar allData também
-      setAllData(prevData => prevData.map(item => {
-        if (item.id === devolucaoId) {
-          const itensAtualizados = item.itens?.map((prod: any) => 
-            prod.id === itemId ? { ...prod, motivo_id: motivoId } : prod
-          );
-
-          // Recalcular se todos têm motivo usando os dados atualizados
-          const todosTemMotivoLocal = itensAtualizados && itensAtualizados.length > 0 && 
-            itensAtualizados.every((prod: any) => prod.motivo_id);
-
-          const motivoCounts: Record<string, number> = {};
-          let primeiroMotivo: string | null = null;
-          
-          itensAtualizados?.forEach((prod: any) => {
-            if (prod.motivo_id) {
-              if (!primeiroMotivo) {
-                primeiroMotivo = prod.motivo_id;
-              }
-              motivoCounts[prod.motivo_id] = (motivoCounts[prod.motivo_id] || 0) + 1;
-            }
-          });
-
-          let motivoMaisRepetidoLocal: string | null = primeiroMotivo;
-          let maxCount = 0;
-          
-          Object.entries(motivoCounts).forEach(([motivo, count]) => {
-            if (count > maxCount) {
-              maxCount = count;
-              motivoMaisRepetidoLocal = motivo;
-            }
-          });
-
-          // Buscar nome do motivo mais repetido
-          const motivoMaisRepetidoObj = motivos.find(m => m.id === motivoMaisRepetidoLocal);
-          const motivoNome = motivoMaisRepetidoObj?.nome || item.motivo || '-';
-
-          return {
-            ...item,
-            itens: itensAtualizados,
-            resultado: todosTemMotivoLocal ? 'VALIDADA' : item.resultado,
-            motivo_id: todosTemMotivoLocal && motivoMaisRepetidoLocal ? motivoMaisRepetidoLocal : item.motivo_id,
-            motivo: todosTemMotivoLocal && motivoMaisRepetidoLocal ? motivoNome : item.motivo,
-            motivos_devolucao: todosTemMotivoLocal && motivoMaisRepetidoLocal ? motivoMaisRepetidoObj : item.motivos_devolucao
-          };
-        }
-        return item;
-      }));
-
-      if (todosTemMotivo) {
-        toast.success("Todos os produtos validados! Resultado alterado para VALIDADA.");
+      // Verificar se o update retornou dados (agora deve funcionar com a política RLS)
+      if (updatedItem && updatedItem.length > 0 && updatedItem[0].motivo_id === motivoId) {
+        console.log('✅ Motivo salvo com sucesso! Item atualizado:', updatedItem[0]);
       } else {
-        toast.success("Motivo do item atualizado!");
+        console.warn('⚠️ Update pode não ter funcionado completamente, verificando...');
+      }
+
+      // Aguardar um pouco para garantir que o banco processou o update
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Verificar se o update realmente funcionou fazendo uma busca
+      let itemVerificado = null;
+      let tentativasVerificacao = 0;
+      const maxTentativasVerificacao = 5;
+      
+      while (tentativasVerificacao < maxTentativasVerificacao) {
+        const { data, error: verifError } = await supabase
+          .from('itens_devolucao')
+          .select('id, motivo_id, devolucao_id')
+          .eq('id', itemIdString)
+          .single();
+        
+        if (verifError) {
+          console.error(`Erro ao verificar item (tentativa ${tentativasVerificacao + 1}):`, verifError);
+          if (tentativasVerificacao === maxTentativasVerificacao - 1) {
+            console.warn('Não foi possível verificar o item após todas as tentativas');
+            break;
+          }
+        } else if (data) {
+          itemVerificado = data;
+          console.log(`Item verificado (tentativa ${tentativasVerificacao + 1}):`, itemVerificado);
+          
+          // Se o motivo foi salvo, podemos parar
+          if (itemVerificado.motivo_id === motivoId) {
+            console.log('✅ Motivo confirmado no banco de dados!');
+            break;
+          }
+        }
+        
+        // Se ainda não confirmou, aguardar e tentar novamente
+        if (tentativasVerificacao < maxTentativasVerificacao - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        
+        tentativasVerificacao++;
+      }
+      
+      // Se após todas as tentativas o motivo ainda não foi salvo, mostrar erro
+      if (!itemVerificado || itemVerificado.motivo_id !== motivoId) {
+        console.error('❌ Update não funcionou após todas as tentativas!', {
+          esperado: motivoId,
+          atual: itemVerificado?.motivo_id || 'null',
+          itemVerificado
+        });
+        toast.error("Erro: Não foi possível salvar o motivo. Pode ser um problema de permissões no banco de dados.");
+        return;
+      }
+
+      // Atualizar estado local imediatamente
+      const getEstadoAtualizado = (devolucao: any) => {
+        const itensAtualizados = devolucao.itens?.map((prod: any) =>
+          String(prod.id) === itemIdString ? { ...prod, motivo_id: motivoId } : prod
+        );
+
+        return {
+          itensAtualizados
+        };
+      };
+
+      // Atualizar estado local
+      setData(prevData =>
+        prevData.map((d: any) => {
+          if (String(d.id) !== devolucaoIdString) return d;
+          const next = getEstadoAtualizado(d);
+          return { ...d, itens: next.itensAtualizados };
+        })
+      );
+      setAllData(prevData =>
+        prevData.map((d: any) => {
+          if (String(d.id) !== devolucaoIdString) return d;
+          const next = getEstadoAtualizado(d);
+          return { ...d, itens: next.itensAtualizados };
+        })
+      );
+
+      // Aguardar um pouco para garantir que o banco foi atualizado
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Verificar no banco de dados se TODOS os produtos têm motivos
+      // Usar a mesma query que carrega os dados inicialmente (com join) para garantir que funciona
+      let todosItens: any[] | null = null;
+      let itensError: any = null;
+      let tentativas = 0;
+      const maxTentativas = 5;
+
+      // Tentar buscar os itens algumas vezes para garantir que temos os dados atualizados
+      while (tentativas < maxTentativas) {
+        // Usar a mesma query que funciona no fetchReturns
+        const { data: devolucaoData, error: devError } = await supabase
+          .from('devolucoes')
+          .select(`
+            itens:itens_devolucao(id, motivo_id)
+          `)
+          .eq('id', devolucaoIdString)
+          .single();
+        
+        if (devError) {
+          console.error(`Erro ao buscar devolução (tentativa ${tentativas + 1}):`, devError);
+          // Tentar método alternativo
+          const { data: itensData, error: altError } = await supabase
+            .from('itens_devolucao')
+            .select('id, motivo_id')
+            .eq('devolucao_id', devolucaoIdString);
+          
+          todosItens = itensData;
+          itensError = altError;
+        } else if (devolucaoData && devolucaoData.itens) {
+          todosItens = devolucaoData.itens;
+          itensError = null;
+        }
+        
+        if (itensError) {
+          console.error(`Erro ao buscar itens (tentativa ${tentativas + 1}):`, itensError);
+          if (tentativas === maxTentativas - 1) break;
+        } else if (todosItens) {
+          // Verificar se o item atualizado tem o motivo
+          const itemAtualizado = todosItens.find((i: any) => String(i.id) === itemIdString);
+          console.log(`Tentativa ${tentativas + 1} - Item encontrado:`, itemAtualizado);
+          
+          if (itemAtualizado && itemAtualizado.motivo_id === motivoId) {
+            console.log(`✅ Item confirmado com motivo na tentativa ${tentativas + 1}`);
+            break;
+          } else if (itemAtualizado) {
+            console.log(`Item ainda não tem o motivo correto. Esperado: ${motivoId}, Atual: ${itemAtualizado.motivo_id}`);
+          }
+        }
+        
+        if (tentativas < maxTentativas - 1) {
+          console.log(`Aguardando e tentando novamente... (tentativa ${tentativas + 1}/${maxTentativas})`);
+          await new Promise(resolve => setTimeout(resolve, 400));
+        }
+        
+        tentativas++;
+      }
+
+      if (itensError) {
+        console.error('Erro ao buscar itens após todas as tentativas:', itensError);
+        throw itensError;
+      }
+
+      if (!todosItens) {
+        console.error('Não foi possível buscar os itens');
+        toast.error("Erro: Não foi possível buscar os itens da devolução");
+        return;
+      }
+
+      console.log('Itens encontrados:', todosItens);
+
+      // Verificar se todos os produtos têm motivos (verificação no banco de dados)
+      // Verificar se há itens e se todos têm motivo_id não nulo
+      const temItens = todosItens && todosItens.length > 0;
+      const todosTemMotivo = temItens && todosItens.every((item: any) => {
+        const temMotivo = Boolean(item.motivo_id) && item.motivo_id !== null && item.motivo_id !== '';
+        console.log('Item:', item.id, 'tem motivo?', temMotivo, 'motivo_id:', item.motivo_id);
+        return temMotivo;
+      });
+      
+      console.log('Todos têm motivo?', todosTemMotivo, 'Total de itens:', todosItens.length, 'Itens com motivos:', todosItens.filter((i: any) => Boolean(i.motivo_id)).length);
+
+      // Calcular motivo mais repetido baseado nos dados do banco
+      const motivoCounts: Record<string, number> = {};
+      let motivoMaisRepetido: string | null = null;
+      let maxCount = 0;
+
+      if (todosItens) {
+        todosItens.forEach((item: any) => {
+          if (!item.motivo_id || item.motivo_id === null || item.motivo_id === '') return;
+          const id = String(item.motivo_id);
+          const count = (motivoCounts[id] || 0) + 1;
+          motivoCounts[id] = count;
+          if (count > maxCount) {
+            maxCount = count;
+            motivoMaisRepetido = id;
+          }
+        });
+      }
+
+      console.log('Motivo mais repetido:', motivoMaisRepetido, 'Contagem:', motivoCounts);
+
+      // Só mudar para VALIDADA se TODOS os produtos tiverem motivos
+      // Se todos têm motivos, sempre haverá um motivo mais repetido (pelo menos um)
+      if (todosTemMotivo) {
+        // Se não encontrou motivo mais repetido mas todos têm motivos, usar o primeiro
+        const motivoParaSalvar = motivoMaisRepetido || (todosItens && todosItens.length > 0 && todosItens[0]?.motivo_id ? String(todosItens[0].motivo_id) : null);
+        
+        if (!motivoParaSalvar) {
+          console.error('Erro: Todos têm motivos mas não foi possível determinar o motivo principal');
+          toast.error("Erro ao validar: não foi possível determinar o motivo principal");
+          return;
+        }
+
+        console.log('Validando nota...', { motivoParaSalvar });
+        
+        const { data: devolucaoAntes, error: devolucaoError } = await supabase
+          .from('devolucoes')
+          .select('resultado, motivo_id')
+          .eq('id', devolucaoIdString)
+          .single();
+
+        if (devolucaoError) {
+          console.error('Erro ao buscar devolução:', devolucaoError);
+          throw devolucaoError;
+        }
+
+        const motivoObj = motivos.find(m => m.id === motivoParaSalvar);
+        const motivoNome = motivoObj?.nome || '';
+
+        const updateData: any = {
+          resultado: 'VALIDADA',
+          prazo: 'CONCLUIDO',
+          nome_validador: nomeValidador,
+          motivo_id: motivoParaSalvar
+        };
+
+        console.log('Atualizando devolução com:', updateData);
+
+        const { error: updateError } = await supabase
+          .from('devolucoes')
+          .update(updateData)
+          .eq('id', devolucaoIdString);
+
+        if (updateError) {
+          console.error('Erro ao atualizar devolução:', updateError);
+          throw updateError;
+        }
+
+        console.log('Devolução atualizada com sucesso!');
+
+        await supabase.from('logs_validacao').insert({
+          devolucao_id: devolucaoIdString,
+          usuario_id: user.id,
+          acao: 'SELECIONAR_MOTIVO_PRODUTO',
+          status_anterior: devolucaoAntes?.resultado || 'PENDENTE VALIDAÇÃO',
+          status_novo: 'VALIDADA'
+        });
+
+        // Atualizar estado local com resultado VALIDADA
+        setData(prevData =>
+          prevData.map((d: any) => {
+            if (String(d.id) !== devolucaoIdString) return d;
+            return {
+              ...d,
+              resultado: 'VALIDADA',
+              prazo: 'CONCLUIDO',
+              nome_validador: nomeValidador,
+              motivo_id: motivoParaSalvar,
+              motivo: motivoNome || d.motivo
+            };
+          })
+        );
+        setAllData(prevData =>
+          prevData.map((d: any) => {
+            if (String(d.id) !== devolucaoIdString) return d;
+            return {
+              ...d,
+              resultado: 'VALIDADA',
+              prazo: 'CONCLUIDO',
+              nome_validador: nomeValidador,
+              motivo_id: motivoParaSalvar,
+              motivo: motivoNome || d.motivo
+            };
+          })
+        );
+
+        toast.success("Motivo salvo! Todos os produtos têm motivos. Resultado alterado para VALIDADA!");
+      } else {
+        const itensComMotivo = todosItens?.filter((i: any) => Boolean(i.motivo_id)).length || 0;
+        const totalItens = todosItens?.length || 0;
+        toast.success(`Motivo salvo para o produto! (${itensComMotivo}/${totalItens} produtos com motivos)`);
       }
 
     } catch (error: any) {
+        console.error('Erro completo:', error);
         toast.error("Erro ao atualizar motivo: " + error.message);
     }
   };
@@ -1488,10 +1769,12 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
         title="Validação" 
         description="Valide e gerencie devoluções pendentes. Selecione motivos, altere resultados e adicione comentários para cada devolução."
       />
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2">
+      
+      <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+        <FilterBar />
+        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto shrink-0">
           {isSelectMode && selectedItems.size > 0 && (
-            <Button variant="destructive" onClick={handleDeleteMultiple}>
+            <Button variant="destructive" onClick={handleDeleteMultiple} className="w-full sm:w-auto">
               <Trash2 className="mr-2 h-4 w-4" />
               Excluir ({selectedItems.size})
             </Button>
@@ -1502,6 +1785,7 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
               setIsSelectMode(!isSelectMode);
               setSelectedItems(new Set());
             }}
+            className="w-full sm:w-auto"
           >
             {isSelectMode ? (
               <>
@@ -1515,17 +1799,15 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
               </>
             )}
           </Button>
-          <Button variant="outline" onClick={generatePDF}>
+          <Button variant="outline" onClick={generatePDF} className="w-full sm:w-auto">
             <FileText className="mr-2 h-4 w-4" />
             Gerar PDF
           </Button>
         </div>
       </div>
-      
-      <FilterBar />
 
       {/* Cards de Estatísticas */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">NF Pendentes</CardTitle>
@@ -1540,6 +1822,22 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">R$ {stats.totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">NF Validadas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">{stats.nfValidadas}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Total Validadas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">R$ {stats.totalValidadas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
           </CardContent>
         </Card>
         <Card>
@@ -1587,6 +1885,38 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                 <p>Nenhuma devolução encontrada.</p>
             </div>
         ) : (
+        <>
+        {/* Paginação no topo */}
+        {allData.length > itemsPerPage && (
+          <div className="flex items-center justify-between px-4 py-3 border-b">
+            <div className="text-sm text-muted-foreground">
+              Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, allData.length)} de {allData.length} registros
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Anterior
+              </Button>
+              <div className="text-sm text-muted-foreground">
+                Página {currentPage} de {Math.ceil(allData.length / itemsPerPage)}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.min(Math.ceil(allData.length / itemsPerPage), prev + 1))}
+                disabled={currentPage >= Math.ceil(allData.length / itemsPerPage)}
+              >
+                Próxima
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
         <Table>
           <TableHeader>
@@ -1770,16 +2100,22 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                         item.prazo === 'EM ATRASO' 
                                           ? 'bg-red-500 text-white' 
                                           : item.prazo === 'NO PRAZO' 
-                                          ? 'bg-green-500 text-white' 
+                                          ? 'bg-green-500 text-white'
+                                          : item.prazo === 'FINALIZADO'
+                                          ? 'bg-green-200 text-green-800 dark:bg-green-900 dark:text-green-200'
+                                          : item.prazo === 'TRATANDO'
+                                          ? 'bg-purple-200 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
+                                          : item.prazo === 'CONCLUIDO'
+                                          ? 'bg-blue-200 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
                                           : 'bg-gray-500 text-white'
                                       }`}>
                                         {item.prazo || '-'}
                                       </span>
                                     </div>
-                                    <div className="w-36">
+                                    <div className="w-32">
                                         <Button
                                           size="sm"
-                                          className={`${RESULTADO_CORES[resultado]} cursor-pointer text-[9px] px-1 py-0.5 w-full`}
+                                          className={`${RESULTADO_CORES[resultado]} cursor-pointer text-[8px] px-1 py-0.5 h-6 w-full`}
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleResultadoChange(item.id, resultado);
@@ -1793,7 +2129,11 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                     </div>
                                     <div className="w-48 flex gap-1">
                                       <Textarea
-                                        className="h-7 text-[9px] min-h-[28px] max-h-[28px] resize-none flex-1"
+                                        className={`h-7 text-[9px] min-h-[28px] max-h-[28px] resize-none flex-1 ${
+                                          comentarios[item.id] || item.justificativa
+                                            ? 'bg-red-100/50 dark:bg-red-900/20 border-red-300 dark:border-red-700'
+                                            : ''
+                                        }`}
                                         placeholder="Comentário..."
                                         value={comentarios[item.id] || ''}
                                         onChange={(e) => handleComentarioChange(item.id, e.target.value)}
@@ -1826,30 +2166,34 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                       >
                                         <Share2 className="h-3 w-3" />
                                       </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="h-7 px-1"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleEdit(item);
-                                        }}
-                                        title="Editar"
-                                      >
-                                        <Edit className="h-3 w-3" />
-                                      </Button>
-                                      <Button
-                                        size="sm"
-                                        variant="destructive"
-                                        className="h-7 px-1"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          handleDelete(item.id);
-                                        }}
-                                        title="Excluir"
-                                      >
-                                        <Trash2 className="h-3 w-3" />
-                                      </Button>
+                                      {(user?.role === 'ADMIN' || user?.role === 'LOGISTICA') && (
+                                        <>
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 px-1"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleEdit(item);
+                                            }}
+                                            title="Editar"
+                                          >
+                                            <Edit className="h-3 w-3" />
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            variant="destructive"
+                                            className="h-7 px-1"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDelete(item.id);
+                                            }}
+                                            title="Excluir"
+                                          >
+                                            <Trash2 className="h-3 w-3" />
+                                          </Button>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
                                 </div>
@@ -1890,7 +2234,23 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                                 value={prod.motivo_id || ''}
                                                 onChange={(e) => {
                                                   e.stopPropagation();
-                                                  handleMotivoItemChange(prod.id, e.target.value, item.id);
+                                                  const motivoSelecionado = e.target.value;
+                                                  console.log('Select onChange:', { 
+                                                    motivoSelecionado, 
+                                                    prodId: prod.id, 
+                                                    itemId: item.id,
+                                                    produto: prod
+                                                  });
+                                                  if (motivoSelecionado && prod.id && item.id) {
+                                                    handleMotivoItemChange(prod.id, motivoSelecionado, item.id);
+                                                  } else {
+                                                    console.error('Valores inválidos:', { 
+                                                      motivoSelecionado, 
+                                                      prodId: prod.id, 
+                                                      itemId: item.id 
+                                                    });
+                                                    toast.error("Erro: Dados inválidos para salvar motivo");
+                                                  }
                                                 }}
                                                 onMouseDown={(e) => {
                                                   e.stopPropagation();
@@ -1964,6 +2324,39 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
           </TableBody>
         </Table>
         </div>
+        
+        {/* Paginação */}
+        {allData.length > itemsPerPage && (
+          <div className="flex items-center justify-between px-4 py-3 border-t">
+            <div className="text-sm text-muted-foreground">
+              Mostrando {((currentPage - 1) * itemsPerPage) + 1} a {Math.min(currentPage * itemsPerPage, allData.length)} de {allData.length} registros
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Anterior
+              </Button>
+              <div className="text-sm text-muted-foreground">
+                Página {currentPage} de {Math.ceil(allData.length / itemsPerPage)}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.min(Math.ceil(allData.length / itemsPerPage), prev + 1))}
+                disabled={currentPage >= Math.ceil(allData.length / itemsPerPage)}
+              >
+                Próxima
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          </div>
+        )}
+        </>
         )}
       </div>
 

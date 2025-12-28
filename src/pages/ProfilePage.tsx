@@ -25,6 +25,9 @@ import {
   ResponsiveContainer,
   Legend
 } from 'recharts';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Calendar } from "@/components/ui/calendar";
+import { Share2 } from "lucide-react";
 
 export function ProfilePage() {
   const { user } = useAuthStore();
@@ -43,6 +46,11 @@ export function ProfilePage() {
   });
   const [timelineData, setTimelineData] = useState<any[]>([]);
   const [summaryText, setSummaryText] = useState("");
+  const [userKPIs, setUserKPIs] = useState<any>(null); // KPIs de usuários para ADMIN
+  
+  // Estados para compartilhamento WhatsApp
+  const [showValidationDialog, setShowValidationDialog] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
 
   useEffect(() => {
     if (user) {
@@ -50,19 +58,24 @@ export function ProfilePage() {
         if (user.role === 'ADMIN' || user.role === 'GESTOR') {
             fetchAuditLogs();
         }
+        if (user.role === 'ADMIN') {
+            fetchUserKPIs();
+        }
     }
   }, [user, filters]); // Recalcula quando mudar o filtro de data
 
   const fetchUserStats = async () => {
       if (!user) return;
 
-      // Buscar devoluções do usuário atual
+      // Se ADMIN, buscar TODAS as devoluções (dados gerais)
+      // Se não ADMIN, buscar devoluções do usuário atual
       let userQuery = supabase
         .from('devolucoes')
         .select('*');
       
-      // Filtrar por vendedor se for VENDEDOR
-      if (user.role === 'VENDEDOR' && user.vendedor) {
+      if (user.role === 'ADMIN') {
+        // ADMIN vê tudo - não filtrar por usuário
+      } else if (user.role === 'VENDEDOR' && user.vendedor) {
         userQuery = userQuery.eq('vendedor', user.vendedor);
       } else {
         // Para outros roles, buscar por nome do vendedor
@@ -171,6 +184,422 @@ export function ProfilePage() {
       }
   };
 
+  const fetchUserKPIs = async () => {
+      if (!user || user.role !== 'ADMIN') return;
+      
+      try {
+        // Buscar todos os usuários VENDEDOR
+        const { data: usuarios } = await supabase
+          .from('profiles')
+          .select('id, name, role, vendedor')
+          .eq('role', 'VENDEDOR');
+        
+        if (!usuarios) return;
+        
+        // Buscar todas as devoluções com logs de validação
+        const { data: devolucoes } = await supabase
+          .from('devolucoes')
+          .select(`
+            *,
+            logs_validacao(
+              usuario_id,
+              created_at,
+              status_novo,
+              status_anterior
+            )
+          `);
+        
+        if (!devolucoes) return;
+        
+        // Criar mapa de vendedor -> usuário
+        const vendedorUsuarioMap: Record<string, any> = {};
+        usuarios.forEach((usuario) => {
+          if (usuario.vendedor) {
+            vendedorUsuarioMap[usuario.vendedor] = {
+              id: usuario.id,
+              name: usuario.name,
+              role: usuario.role,
+              vendedor: usuario.vendedor,
+              tempoMedioValidacao: 0,
+              diasAtraso: 0,
+              totalValidacoes: 0,
+              notasPendentes: 0,
+              notasCancelamento: 0,
+              devolucoesValidadas: [] as any[],
+              ultimaValidacao: null as Date | null
+            };
+          }
+        });
+        
+        const hoje = new Date();
+        hoje.setHours(0, 0, 0, 0);
+        
+        // Processar devoluções por vendedor (não por usuário que validou)
+        devolucoes.forEach((devol) => {
+          const vendedor = devol.vendedor;
+          if (!vendedor || !vendedorUsuarioMap[vendedor]) return;
+          
+          const usuario = vendedorUsuarioMap[vendedor];
+          const logs = devol.logs_validacao || [];
+          
+          // Contar notas pendentes
+          if (devol.resultado === 'PENDENTE VALIDAÇÃO') {
+            usuario.notasPendentes++;
+          }
+          
+          // Contar notas em cancelamento
+          if (devol.resultado === 'TRATATIVA DE ANULAÇÃO') {
+            usuario.notasCancelamento++;
+          }
+          
+          // Encontrar log de validação (status_novo = VALIDADA)
+          const logValidacao = logs.find((log: any) => log.status_novo === 'VALIDADA');
+          
+          if (logValidacao) {
+            const logDate = new Date(logValidacao.created_at);
+            const devolDate = new Date(devol.data_emissao || devol.created_at);
+            const diasDiferenca = Math.floor((logDate.getTime() - devolDate.getTime()) / (1000 * 60 * 60 * 24));
+            
+            usuario.totalValidacoes++;
+            usuario.tempoMedioValidacao += diasDiferenca;
+            
+            // Atualizar última validação se for mais recente
+            if (!usuario.ultimaValidacao || logDate > usuario.ultimaValidacao) {
+              usuario.ultimaValidacao = logDate;
+            }
+            
+            usuario.devolucoesValidadas.push({
+              dias: diasDiferenca,
+              prazo: devol.prazo
+            });
+          }
+        });
+        
+        // Calcular médias e dias em atraso
+        Object.keys(vendedorUsuarioMap).forEach((vendedor) => {
+          const usuario = vendedorUsuarioMap[vendedor];
+          if (usuario.totalValidacoes > 0) {
+            usuario.tempoMedioValidacao = Math.round(usuario.tempoMedioValidacao / usuario.totalValidacoes);
+          }
+          
+          // Calcular dias em atraso: diferença entre última validação e hoje
+          if (usuario.ultimaValidacao) {
+            const ultimaValidacaoDate = new Date(usuario.ultimaValidacao);
+            ultimaValidacaoDate.setHours(0, 0, 0, 0);
+            usuario.diasAtraso = Math.floor((hoje.getTime() - ultimaValidacaoDate.getTime()) / (1000 * 60 * 60 * 24));
+          } else {
+            usuario.diasAtraso = 0;
+          }
+        });
+        
+        setUserKPIs({
+          usuarios: Object.values(vendedorUsuarioMap),
+          totalUsuarios: Object.keys(vendedorUsuarioMap).length
+        });
+      } catch (error) {
+        console.error('Erro ao buscar KPIs de usuários:', error);
+      }
+  };
+
+  // Função para buscar validações do vendedor para uma data específica
+  const fetchValidacoesPorData = async (data: Date) => {
+    if (!user || user.role !== 'VENDEDOR' || !user.vendedor) return [];
+    
+    // Formatar data como YYYY-MM-DD para usar na query
+    const dataStr = format(data, 'yyyy-MM-dd');
+    
+    console.log('Buscando validações para a data:', dataStr);
+    console.log('Vendedor do usuário:', user.vendedor);
+    
+    // Estratégia: buscar devoluções validadas do vendedor
+    // e depois verificar a data de validação através dos logs
+    // Não usar join com order by em tabela relacionada (não funciona no Supabase)
+    const { data: devolucoes, error: devolucoesError } = await supabase
+      .from('devolucoes')
+      .select(`
+        *,
+        itens:itens_devolucao(*, motivo_item:motivos_devolucao(nome)),
+        logs_validacao!inner(
+          created_at,
+          status_novo,
+          acao
+        )
+      `)
+      .eq('vendedor', user.vendedor)
+      .eq('resultado', 'VALIDADA')
+      .eq('logs_validacao.status_novo', 'VALIDADA');
+    
+    if (devolucoesError) {
+      console.error('Erro ao buscar devoluções com logs:', devolucoesError);
+      
+      // Fallback: buscar apenas devoluções validadas e depois buscar logs separadamente
+      console.log('Tentando fallback: buscar devoluções sem join...');
+      const { data: devolucoesSimples, error: simplesError } = await supabase
+        .from('devolucoes')
+        .select(`
+          *,
+          itens:itens_devolucao(*, motivo_item:motivos_devolucao(nome))
+        `)
+        .eq('vendedor', user.vendedor)
+        .eq('resultado', 'VALIDADA');
+      
+      if (simplesError) {
+        console.error('Erro ao buscar devoluções simples:', simplesError);
+        return [];
+      }
+      
+      console.log('Devoluções encontradas (sem filtro de data):', devolucoesSimples?.length || 0);
+      
+      // Buscar logs para cada devolução
+      if (devolucoesSimples && devolucoesSimples.length > 0) {
+        const devolucoesIds = devolucoesSimples.map(d => d.id);
+        
+        // Buscar logs de validação para essas devoluções
+        const { data: logs, error: logsError } = await supabase
+          .from('logs_validacao')
+          .select('devolucao_id, created_at, status_novo')
+          .in('devolucao_id', devolucoesIds)
+          .eq('status_novo', 'VALIDADA')
+          .order('created_at', { ascending: false });
+        
+        if (logsError) {
+          console.error('Erro ao buscar logs:', logsError);
+          console.log('Retornando todas as devoluções sem filtro de data');
+          // Retornar todas as devoluções se não conseguir buscar logs
+          return devolucoesSimples;
+        }
+        
+        console.log('Logs encontrados:', logs?.length || 0);
+        if (logs && logs.length > 0) {
+          console.log('Primeiros 3 logs:', logs.slice(0, 3).map(l => ({
+            devolucao_id: l.devolucao_id,
+            created_at: l.created_at,
+            data_formatada: format(new Date(l.created_at), 'yyyy-MM-dd'),
+            status: l.status_novo
+          })));
+        } else {
+          console.log('⚠️ Nenhum log encontrado para as devoluções!');
+        }
+        
+        // Criar mapa de data de validação por devolução (pegar o log mais recente de cada devolução)
+        const validacaoPorDevolucao = new Map<string, Date>();
+        logs?.forEach(log => {
+          const existing = validacaoPorDevolucao.get(log.devolucao_id);
+          const logDate = new Date(log.created_at);
+          // Se não existe ou se este log é mais recente, atualizar
+          if (!existing || logDate > existing) {
+            validacaoPorDevolucao.set(log.devolucao_id, logDate);
+          }
+        });
+        
+        console.log('Mapa de validações criado:', validacaoPorDevolucao.size, 'devoluções com data de validação');
+        console.log('Data buscada:', dataStr);
+        
+        // Mostrar algumas datas de validação para debug
+        if (validacaoPorDevolucao.size > 0) {
+          const primeirasDatas = Array.from(validacaoPorDevolucao.entries()).slice(0, 5);
+          console.log('Primeiras datas de validação:', primeirasDatas.map(([id, date]) => ({
+            devolucao_id: id.substring(0, 8) + '...',
+            data: format(date, 'yyyy-MM-dd')
+          })));
+        }
+        
+        // Filtrar devoluções validadas na data escolhida
+        const devolucoesFiltradas = devolucoesSimples.filter(devol => {
+          const dataValidacao = validacaoPorDevolucao.get(devol.id);
+          if (!dataValidacao) {
+            console.log('Devolução', devol.numero, 'não tem data de validação nos logs');
+            return false;
+          }
+          const dataValidacaoStr = format(dataValidacao, 'yyyy-MM-dd');
+          const match = dataValidacaoStr === dataStr;
+          if (!match) {
+            console.log('Devolução', devol.numero, 'validada em', dataValidacaoStr, 'não corresponde a', dataStr);
+          }
+          return match;
+        });
+        
+        console.log('Devoluções filtradas pela data:', devolucoesFiltradas.length);
+        if (devolucoesFiltradas.length > 0) {
+          console.log('Primeiras devoluções filtradas:', devolucoesFiltradas.slice(0, 3).map(d => ({
+            numero: d.numero,
+            vendedor: d.vendedor
+          })));
+        }
+        return devolucoesFiltradas;
+      }
+      
+      return [];
+    }
+    
+    if (!devolucoes || devolucoes.length === 0) {
+      console.log('Nenhuma devolução encontrada');
+      return [];
+    }
+    
+    console.log('Devoluções encontradas (com join):', devolucoes.length);
+    
+    // Filtrar pela data de validação (usando o log mais recente de cada devolução)
+    const devolucoesFiltradas = devolucoes.filter((devol: any) => {
+      const logs = devol.logs_validacao || [];
+      if (logs.length === 0) return false;
+      
+      // Pegar o log mais recente de validação
+      const logValidacao = logs
+        .filter((l: any) => l.status_novo === 'VALIDADA')
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+      
+      if (!logValidacao) return false;
+      
+      const dataValidacao = new Date(logValidacao.created_at);
+      const dataValidacaoStr = format(dataValidacao, 'yyyy-MM-dd');
+      return dataValidacaoStr === dataStr;
+    });
+    
+    console.log('Devoluções filtradas pela data:', devolucoesFiltradas.length);
+    
+    // Remover os logs do objeto antes de retornar (já foram usados para filtrar)
+    const devolucoesLimpos = devolucoesFiltradas.map((devol: any) => {
+      const { logs_validacao, ...resto } = devol;
+      return resto;
+    });
+    
+    return devolucoesLimpos;
+  };
+  
+  // Função para buscar tratativas do vendedor
+  const fetchTratativas = async () => {
+    if (!user || user.role !== 'VENDEDOR' || !user.vendedor) return [];
+    
+    const { data: devolucoes } = await supabase
+      .from('devolucoes')
+      .select(`
+        *,
+        itens:itens_devolucao(*)
+      `)
+      .eq('vendedor', user.vendedor)
+      .eq('resultado', 'TRATATIVA DE ANULAÇÃO')
+      .order('data_emissao', { ascending: false });
+    
+    return devolucoes || [];
+  };
+  
+  // Função para gerar texto de validações
+  const gerarTextoValidacoes = (devolucoes: any[], data: Date) => {
+    if (!user || !user.vendedor) return '';
+    
+    const dataFormatada = format(data, 'dd/MM/yyyy', { locale: ptBR });
+    let texto = `✅ *RESUMO: NOTAS VALIDADAS - ${user.vendedor}*\n\n`;
+    texto += `📆 *DATA DA VALIDAÇÃO* ${dataFormatada}\n`;
+    texto += `👤 *USUÁRIO* ${user.name}\n\n`;
+    texto += `🔎 *DETALHAMENTO*\n\n`;
+    
+    devolucoes.forEach((devol, index) => {
+      texto += `============= ${index + 1}º NOTA FISCAL =============\n`;
+      texto += `📄 *DEVOLUÇÃO Nº* ${devol.numero || '-'}\n`;
+      texto += `🏪 *Cliente:* ${devol.nome_cliente || '-'}\n`;
+      texto += `💼 *Vendedor:* ${devol.vendedor || '-'}\n`;
+      texto += `📆 *Data de Emissão:* ${format(new Date(devol.data_emissao), 'dd/MM/yyyy', { locale: ptBR })}\n`;
+      texto += `📝 *Observação:* ${devol.justificativa || '-'}\n`;
+      
+      // Calcular valor total
+      const valorTotal = devol.itens?.reduce((sum: number, item: any) => 
+        sum + (Number(item.valor_total_bruto) || 0), 0) || Number(devol.valor_total_nota) || 0;
+      texto += `💰 *Valor Total da NFD:* R$ ${valorTotal.toFixed(2)}\n`;
+      
+      // Calcular dias para validação
+      const dataEmissao = new Date(devol.data_emissao);
+      const dataValidacao = new Date(data);
+      const dias = Math.floor((dataValidacao.getTime() - dataEmissao.getTime()) / (1000 * 60 * 60 * 24));
+      texto += `🔢 *Média de Dias p/ Validação:* ${dias} dias\n`;
+      texto += `⏳ *Prazo:* ${dias >= 3 ? 'VALIDADA COM ATRASO' : 'DENTRO DO PRAZO'}\n`;
+      texto += `-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --\n`;
+      
+      // Produtos
+      devol.itens?.forEach((item: any) => {
+        const descricao = item.descricao || '-';
+        const palavras = descricao.split(' ').slice(0, 3).join(' ');
+        texto += `📦 *Produto:* ${palavras}\n`;
+        texto += `⚖️ *Quantidade:* ${item.quantidade || 0} ${item.unidade || 'UN'}\n`;
+        texto += `💰 *Valor Total:* R$ ${Number(item.valor_total_bruto || 0).toFixed(2)}\n`;
+        texto += `🎯 *Motivo:* ${item.motivo_item?.nome || '-'}\n`;
+        texto += `-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --\n`;
+      });
+    });
+    
+    return texto;
+  };
+  
+  // Função para gerar texto de tratativas
+  const gerarTextoTratativas = (devolucoes: any[]) => {
+    if (!user || !user.vendedor) return '';
+    
+    let texto = `⚠️ *RESUMO: NOTAS EM TRATATIVAS - ${user.vendedor}*\n\n`;
+    texto += `📆 *DATA DA SINALIZAÇÃO* ${format(new Date(), 'dd/MM/yyyy', { locale: ptBR })}\n`;
+    texto += `👤 *USUÁRIO* ${user.name}\n\n`;
+    texto += `🔎 *DETALHAMENTO*\n\n`;
+    
+    devolucoes.forEach((devol, index) => {
+      texto += `============= ${index + 1}º NOTA FISCAL =============\n`;
+      texto += `📄 *DEVOLUÇÃO Nº* ${devol.numero || '-'}\n`;
+      texto += `🏪 *Cliente:* ${devol.nome_cliente || '-'}\n`;
+      texto += `💼 *Vendedor:* ${devol.vendedor || '-'}\n`;
+      texto += `📆 *Data de Emissão:* ${format(new Date(devol.data_emissao), 'dd/MM/yyyy', { locale: ptBR })}\n`;
+      
+      const valorTotal = devol.itens?.reduce((sum: number, item: any) => 
+        sum + (Number(item.valor_total_bruto) || 0), 0) || Number(devol.valor_total_nota) || 0;
+      texto += `💰 *Valor Total da NFD:* R$ ${valorTotal.toFixed(2)}\n`;
+      texto += `📝 *Observação:* ${devol.justificativa || '-'}\n`;
+      texto += `-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --\n`;
+      
+      // Produtos (apenas nomes, 3 primeiras palavras)
+      devol.itens?.forEach((item: any) => {
+        const descricao = item.descricao || '-';
+        const palavras = descricao.split(' ').slice(0, 3).join(' ');
+        texto += `📦 *Produto:* ${palavras}\n`;
+      });
+    });
+    
+    return texto;
+  };
+  
+  // Função para compartilhar via WhatsApp
+  const compartilharWhatsApp = (texto: string) => {
+    // Usar api.whatsapp.com para melhor suporte a emojis
+    const textoEncoded = encodeURIComponent(texto);
+    window.open(`https://api.whatsapp.com/send?text=${textoEncoded}`, '_blank');
+  };
+  
+  // Handler para compartilhar validações
+  const handleCompartilharValidacoes = async () => {
+    if (!selectedDate) {
+      toast.error('Selecione uma data');
+      return;
+    }
+    
+    const devolucoes = await fetchValidacoesPorData(selectedDate);
+    if (devolucoes.length === 0) {
+      toast.error('Nenhuma validação encontrada para esta data');
+      return;
+    }
+    
+    const texto = gerarTextoValidacoes(devolucoes, selectedDate);
+    compartilharWhatsApp(texto);
+    setShowValidationDialog(false);
+  };
+  
+  // Handler para compartilhar tratativas
+  const handleCompartilharTratativas = async () => {
+    const devolucoes = await fetchTratativas();
+    if (devolucoes.length === 0) {
+      toast.error('Nenhuma tratativa encontrada');
+      return;
+    }
+    
+    const texto = gerarTextoTratativas(devolucoes);
+    compartilharWhatsApp(texto);
+  };
+
   const fetchAuditLogs = async () => {
       let query = supabase
         .from('logs_validacao')
@@ -211,11 +640,39 @@ export function ProfilePage() {
 
   if (!user) return null;
 
+  // Se usuário não tem role ou é tipo NOVO, mostrar apenas o header
+  if (!user.role || user.role === 'NOVO') {
+    return (
+      <div className="space-y-6">
+        <PageHeader 
+          title="Meu Perfil" 
+          description="Aguarde a atribuição de permissões por um administrador para acessar os recursos do sistema."
+        />
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center py-12">
+              <Shield className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+              <p className="text-muted-foreground">
+                Seu perfil está aguardando a atribuição de permissões por um administrador.
+              </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Entre em contato com o administrador do sistema para obter acesso.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader 
-        title="Meu Perfil" 
-        description="Visualize suas métricas pessoais, histórico de validações e gerencie suas configurações de segurança."
+        title={user.role === 'ADMIN' ? "Painel Administrativo" : "Meu Perfil"} 
+        description={user.role === 'ADMIN' 
+          ? "Visão geral de todos os dados do sistema, métricas gerais e KPIs de usuários."
+          : "Visualize suas métricas pessoais, histórico de validações e gerencie suas configurações de segurança."
+        }
       />
       
       {/* Filtros Globais agora presentes no Perfil */}
@@ -235,8 +692,16 @@ export function ProfilePage() {
                 </div>
                 <CardTitle>{user.name}</CardTitle>
                 <CardDescription>{user.email}</CardDescription>
-                <div className="mt-2">
-                    <Badge variant="outline" className="border-primary text-primary">{user.role}</Badge>
+                <div className="mt-2 space-y-1">
+                    <Badge variant="outline" className="border-primary text-primary">
+                      {user.role || 'Sem permissões'}
+                    </Badge>
+                    {user.role === 'VENDEDOR' && user.vendedor && (
+                        <div className="text-sm text-muted-foreground mt-2">
+                            <div className="font-medium">VENDEDOR</div>
+                            <div className="text-primary font-semibold">{user.vendedor}</div>
+                        </div>
+                    )}
                 </div>
             </CardHeader>
             <CardContent>
@@ -402,6 +867,135 @@ export function ProfilePage() {
                                 </p>
                             </div>
                         </div>
+                        
+                        {/* Botões de Compartilhamento WhatsApp - Apenas para VENDEDOR */}
+                        {user.role === 'VENDEDOR' && user.vendedor && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Compartilhar Resumos</CardTitle>
+                                    <CardDescription>Compartilhe seus resumos via WhatsApp</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="flex flex-col sm:flex-row gap-4">
+                                        <Dialog open={showValidationDialog} onOpenChange={setShowValidationDialog}>
+                                            <DialogTrigger asChild>
+                                                <Button className="flex-1" variant="outline">
+                                                    <Share2 className="mr-2 h-4 w-4" />
+                                                    COMPARTILHAR VALIDAÇÃO
+                                                </Button>
+                                            </DialogTrigger>
+                                            <DialogContent>
+                                                <DialogHeader>
+                                                    <DialogTitle>Selecione a Data da Validação</DialogTitle>
+                                                    <DialogDescription>
+                                                        Escolha a data para gerar o resumo de validações
+                                                    </DialogDescription>
+                                                </DialogHeader>
+                                                <div className="py-4">
+                                                    <Calendar
+                                                        mode="single"
+                                                        selected={selectedDate}
+                                                        onSelect={setSelectedDate}
+                                                        className="rounded-md border"
+                                                    />
+                                                </div>
+                                                <DialogFooter>
+                                                    <Button variant="outline" onClick={() => setShowValidationDialog(false)}>
+                                                        Cancelar
+                                                    </Button>
+                                                    <Button onClick={handleCompartilharValidacoes}>
+                                                        OK
+                                                    </Button>
+                                                </DialogFooter>
+                                            </DialogContent>
+                                        </Dialog>
+                                        
+                                        <Button 
+                                            className="flex-1" 
+                                            variant="outline"
+                                            onClick={handleCompartilharTratativas}
+                                        >
+                                            <Share2 className="mr-2 h-4 w-4" />
+                                            COMPARTILHAR TRATATIVAS
+                                        </Button>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
+                        
+                        {/* KPIs de Usuários - Apenas para ADMIN */}
+                        {user.role === 'ADMIN' && userKPIs && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>KPIs de Usuários</CardTitle>
+                                    <CardDescription>Métricas de desempenho por usuário</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="space-y-4">
+                                        {userKPIs.usuarios.map((usuario: any, index: number) => (
+                                            <div key={index} className="border rounded-lg p-4">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <div>
+                                                        <h4 className="font-semibold">{usuario.name}</h4>
+                                                        {usuario.role === 'VENDEDOR' && usuario.vendedor && (
+                                                            <div className="text-xs text-muted-foreground mt-1">
+                                                                <span className="font-medium">VENDEDOR:</span> <span className="text-primary font-semibold">{usuario.vendedor}</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <Badge variant="outline">{usuario.role}</Badge>
+                                                </div>
+                                                <div className="grid gap-2 md:grid-cols-3 text-sm">
+                                                    {usuario.role === 'VENDEDOR' && (
+                                                        <>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Média Tempo Validação:</span>
+                                                                <span className="ml-2 font-semibold">{usuario.tempoMedioValidacao} dias</span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Total Validações:</span>
+                                                                <span className="ml-2 font-semibold">{usuario.totalValidacoes}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Dias em Atraso:</span>
+                                                                <span className={`ml-2 font-semibold ${usuario.diasAtraso >= 3 ? 'text-red-600' : 'text-green-600'}`}>
+                                                                    {usuario.diasAtraso} dias
+                                                                </span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Notas Pendentes:</span>
+                                                                <span className="ml-2 font-semibold">{usuario.notasPendentes || 0}</span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Notas em Cancelamento:</span>
+                                                                <span className="ml-2 font-semibold">{usuario.notasCancelamento || 0}</span>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                    {usuario.role === 'LOGISTICA' && (
+                                                        <>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Média Tempo Lançamento:</span>
+                                                                <span className="ml-2 font-semibold">{usuario.tempoMedioLancamento} dias</span>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">Total Lançamentos:</span>
+                                                                <span className="ml-2 font-semibold">{usuario.totalLancamentos}</span>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {userKPIs.usuarios.length === 0 && (
+                                            <p className="text-sm text-muted-foreground text-center py-4">
+                                                Nenhum usuário VENDEDOR ou LOGISTICA encontrado.
+                                            </p>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
                     </TabsContent>
 
                     <TabsContent value="audit" className="mt-6">

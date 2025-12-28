@@ -19,6 +19,18 @@ interface ReportHTMLPageProps {
   filters: any;
 }
 
+// Calcular produtos devolvidos
+function calculateProdutosDevolvidos(data: any[]): number {
+  let total = 0;
+  data.forEach(devol => {
+    const itens = devol.itens || [];
+    itens.forEach((item: any) => {
+      total += Number(item.quantidade) || 0;
+    });
+  });
+  return total;
+}
+
 export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps): string {
   // Calcular dados dos gráficos
   const topClientesChart = data.reduce((acc: any, curr) => {
@@ -101,9 +113,20 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     .sort((a: any, b: any) => b.count - a.count)
     .slice(0, 5);
 
-  // Calcular insights
+  // Calcular novos cards
+  const pendentesValidacao = data.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO').length;
+  const tratativasAnulacao = data.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO').length;
+  const validadasCount = data.filter(d => d.resultado === 'VALIDADA').length;
+  // % PENDENTE = (PENDENTES VALIDAÇÃO) / (TRATATIVA DE ANULAÇÃO + VALIDADA)
+  const totalProcessados = tratativasAnulacao + validadasCount;
+  const percentualPendente = totalProcessados > 0 ? ((pendentesValidacao / totalProcessados) * 100).toFixed(1) : '0';
+  
   const totalValue = data.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
   const totalReturns = data.length;
+  const ticketMedio = totalReturns > 0 ? (totalValue / totalReturns) : 0;
+  
+  const produtosDevolvidos = calculateProdutosDevolvidos(data);
+  
   const insightsList: string[] = [];
   
   if (totalReturns > 0) {
@@ -624,6 +647,21 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
           <div class="stat-title">Total Geral</div>
           <div class="stat-value">${data.length}</div>
           <div class="stat-subvalue">R$ ${stats.totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">% Pendente</div>
+          <div class="stat-value">${percentualPendente}%</div>
+          <div class="stat-subvalue">Pendentes / Processados</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Ticket Médio</div>
+          <div class="stat-value">R$ ${ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+          <div class="stat-subvalue">Por devolução</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Produtos Devolvidos</div>
+          <div class="stat-value">${produtosDevolvidos}</div>
+          <div class="stat-subvalue">Quantidade total</div>
         </div>
       </div>
 
