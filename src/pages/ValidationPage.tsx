@@ -55,11 +55,6 @@ const RESULTADO_ORDEM: Record<ResultadoStatus, number> = {
   'ANULADA/CANCELADA': 5
 };
 
-function getProximoResultado(atual: ResultadoStatus): ResultadoStatus {
-  const index = RESULTADO_CICLO.indexOf(atual);
-  const proximoIndex = (index + 1) % RESULTADO_CICLO.length;
-  return RESULTADO_CICLO[proximoIndex];
-}
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(word => word.length > 0).length;
@@ -535,28 +530,53 @@ export function ValidationPage() {
     return <ArrowDown className="ml-1 h-4 w-4" />;
   };
 
-  const handleResultadoChange = async (id: string, resultadoAtual: string) => {
+  const handleResultadoChange = async (id: string, novoResultado: string) => {
       if (!user) return;
 
-      const resultadoAtualTyped = resultadoAtual as ResultadoStatus;
-      const novoResultado = getProximoResultado(resultadoAtualTyped);
+      const novoResultadoTyped = novoResultado as ResultadoStatus;
+      
+      // Validar se o resultado é válido
+      if (!RESULTADO_CICLO.includes(novoResultadoTyped)) {
+        console.error('Resultado inválido:', novoResultado);
+        toast.error("Resultado inválido");
+        return;
+      }
 
       try {
+        // Buscar resultado atual antes de atualizar
+        const { data: devolucaoAtual, error: fetchError } = await supabase
+          .from('devolucoes')
+          .select('resultado')
+          .eq('id', id)
+          .single();
+        
+        if (fetchError) {
+          console.error('Erro ao buscar resultado atual:', fetchError);
+          throw fetchError;
+        }
+        
+        const resultadoAtual = devolucaoAtual?.resultado || 'PENDENTE VALIDAÇÃO';
+        
+        // Se o resultado não mudou, não fazer nada
+        if (resultadoAtual === novoResultadoTyped) {
+          return;
+        }
+        
         // Calcular prazo baseado no novo resultado
         let novoPrazo = null;
-        if (novoResultado === 'LANÇADA' || novoResultado === 'ANULADA/CANCELADA') {
+        if (novoResultadoTyped === 'LANÇADA' || novoResultadoTyped === 'ANULADA/CANCELADA') {
           novoPrazo = 'FINALIZADO';
-        } else if (novoResultado === 'TRATATIVA DE ANULAÇÃO') {
+        } else if (novoResultadoTyped === 'TRATATIVA DE ANULAÇÃO') {
           novoPrazo = 'TRATANDO';
-        } else if (novoResultado === 'VALIDADA') {
+        } else if (novoResultadoTyped === 'VALIDADA') {
           novoPrazo = 'CONCLUIDO';
-        } else if (novoResultado === 'PENDENTE VALIDAÇÃO') {
+        } else if (novoResultadoTyped === 'PENDENTE VALIDAÇÃO') {
           // Manter cálculo baseado em dias (será recalculado no fetch)
           novoPrazo = null;
         }
         
         // 1. Atualizar Resultado, Prazo, Validada Por e Finalizada Por
-        const updateData: any = { resultado: novoResultado };
+        const updateData: any = { resultado: novoResultadoTyped };
         if (novoPrazo) {
           updateData.prazo = novoPrazo;
         }
@@ -564,12 +584,12 @@ export function ValidationPage() {
         const nomeUsuario = user.name || user.email || '-';
         
         // Salvar validada_por para VALIDADA ou TRATATIVA DE ANULAÇÃO
-        if (novoResultado === 'VALIDADA' || novoResultado === 'TRATATIVA DE ANULAÇÃO') {
+        if (novoResultadoTyped === 'VALIDADA' || novoResultadoTyped === 'TRATATIVA DE ANULAÇÃO') {
           updateData.nome_validador = nomeUsuario;
         }
         
         // Salvar finalizada_por e data_finalizacao para LANÇADA ou ANULADA/CANCELADA
-        if (novoResultado === 'LANÇADA' || novoResultado === 'ANULADA/CANCELADA') {
+        if (novoResultadoTyped === 'LANÇADA' || novoResultadoTyped === 'ANULADA/CANCELADA') {
           updateData.finalizada_por = nomeUsuario;
           updateData.data_finalizacao = new Date().toISOString();
         }
@@ -589,26 +609,26 @@ export function ValidationPage() {
                 usuario_id: user.id,
                 acao: 'ALTERAR_RESULTADO',
                 status_anterior: resultadoAtual,
-                status_novo: novoResultado
+                status_novo: novoResultadoTyped
             });
 
         if (logError) console.error("Erro ao salvar log:", logError);
 
-        toast.success(`Resultado alterado para: ${novoResultado}`);
+        toast.success(`Resultado alterado para: ${novoResultadoTyped}`);
         
         // Calcular prazo para atualização local
         let prazoLocal = null;
-        if (novoResultado === 'LANÇADA' || novoResultado === 'ANULADA/CANCELADA') {
+        if (novoResultadoTyped === 'LANÇADA' || novoResultadoTyped === 'ANULADA/CANCELADA') {
           prazoLocal = 'FINALIZADO';
-        } else if (novoResultado === 'TRATATIVA DE ANULAÇÃO') {
+        } else if (novoResultadoTyped === 'TRATATIVA DE ANULAÇÃO') {
           prazoLocal = 'TRATANDO';
-        } else if (novoResultado === 'VALIDADA') {
+        } else if (novoResultadoTyped === 'VALIDADA') {
           prazoLocal = 'CONCLUIDO';
         }
         
         // Se o novo resultado for LANÇADA ou ANULADA/CANCELADA, remover da lista (vai para Relatórios)
         // VALIDADA e TRATATIVA DE ANULAÇÃO continuam na tela de validação
-        if (novoResultado === 'LANÇADA' || novoResultado === 'ANULADA/CANCELADA') {
+        if (novoResultadoTyped === 'LANÇADA' || novoResultadoTyped === 'ANULADA/CANCELADA') {
           // Remover o item das listas locais
           setData(prevData => prevData.filter(item => item.id !== id));
           setAllData(prevData => prevData.filter(item => item.id !== id));
@@ -618,8 +638,8 @@ export function ValidationPage() {
             if (item.id === id) {
               return {
                 ...item,
-                resultado: novoResultado,
-                nome_validador: novoResultado !== 'PENDENTE VALIDAÇÃO' ? (user.name || user.email || '-') : '-',
+                resultado: novoResultadoTyped,
+                nome_validador: novoResultadoTyped !== 'PENDENTE VALIDAÇÃO' ? (user.name || user.email || '-') : '-',
                 prazo: prazoLocal || item.prazo
               };
             }
@@ -2113,16 +2133,35 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                       </span>
                                     </div>
                                     <div className="w-32">
-                                        <Button
-                                          size="sm"
-                                          className={`${RESULTADO_CORES[resultado]} cursor-pointer text-[8px] px-1 py-0.5 h-6 w-full`}
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleResultadoChange(item.id, resultado);
+                                        <Select
+                                          value={resultado}
+                                          onValueChange={(value) => {
+                                            handleResultadoChange(item.id, value);
                                           }}
                                         >
-                                          {resultado}
-                                        </Button>
+                                          <SelectTrigger 
+                                            className={`h-6 w-full text-[8px] px-1 py-0.5 ${RESULTADO_CORES[resultado]} border-0 cursor-pointer hover:opacity-90`}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                          >
+                                            <SelectValue className="text-white">{resultado}</SelectValue>
+                                          </SelectTrigger>
+                                          <SelectContent 
+                                            onClick={(e) => e.stopPropagation()}
+                                            onMouseDown={(e) => e.stopPropagation()}
+                                            className="z-[10000]"
+                                          >
+                                            {RESULTADO_CICLO.map((res) => (
+                                              <SelectItem 
+                                                key={res} 
+                                                value={res}
+                                                className={`${RESULTADO_CORES[res]} text-white cursor-pointer hover:opacity-90`}
+                                              >
+                                                {res}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
                                     </div>
                                     <div className="w-28 truncate text-[9px]" title={item.nome_validador || '-'}>
                                       {item.nome_validador || '-'}

@@ -272,37 +272,61 @@ export function DashboardPage() {
             }));
         setChartData(chart);
 
-        // 3. Top Clientes
-        const customerMap = devolucoes.reduce((acc: any, curr) => {
+        // 3. Top Clientes - com detalhes
+        const customerMap: Record<string, { valor: number, detalhes: Array<{ cliente: string, nota: string }> }> = {};
+        devolucoes.forEach((curr) => {
             const name = curr.nome_cliente || 'Desconhecido';
             const valor = Number(curr.valor_total_nota) || 0;
-            acc[name] = (acc[name] || 0) + valor;
-            return acc;
-        }, {});
+            if (!customerMap[name]) {
+                customerMap[name] = { valor: 0, detalhes: [] };
+            }
+            customerMap[name].valor += valor;
+            customerMap[name].detalhes.push({
+                cliente: name,
+                nota: curr.numero || '-'
+            });
+        });
         
         const topCust = Object.entries(customerMap)
-            .map(([name, value]) => ({ name, value }))
+            .map(([name, data]) => ({ 
+                name, 
+                value: data.valor,
+                quantidade: data.detalhes.length,
+                detalhes: data.detalhes
+            }))
             .sort((a: any, b: any) => b.value - a.value)
             .slice(0, 10);
         setTopCustomers(topCust);
         
-        // Top Vendedores por valor
-        const vendedorMap = devolucoes.reduce((acc: any, curr) => {
+        // Top Vendedores por valor - com detalhes
+        const vendedorMap: Record<string, { valor: number, detalhes: Array<{ cliente: string, nota: string }> }> = {};
+        devolucoes.forEach((curr) => {
             const vendedor = curr.vendedor || 'Desconhecido';
             const valor = Number(curr.valor_total_nota) || 0;
-            acc[vendedor] = (acc[vendedor] || 0) + valor;
-            return acc;
-        }, {});
+            if (!vendedorMap[vendedor]) {
+                vendedorMap[vendedor] = { valor: 0, detalhes: [] };
+            }
+            vendedorMap[vendedor].valor += valor;
+            vendedorMap[vendedor].detalhes.push({
+                cliente: curr.nome_cliente || 'Desconhecido',
+                nota: curr.numero || '-'
+            });
+        });
         
         const topVend = Object.entries(vendedorMap)
-            .map(([name, value]) => ({ name, value }))
+            .map(([name, data]) => ({ 
+                name, 
+                value: data.valor,
+                quantidade: data.detalhes.length,
+                detalhes: data.detalhes
+            }))
             .sort((a: any, b: any) => b.value - a.value)
             .slice(0, 5);
         setTopVendedores(topVend);
         
-        // Top Redes por valor
-        // Buscar redes dos clientes separadamente se necessário
-        const redeMap = devolucoes.reduce((acc: any, curr) => {
+        // Top Redes por valor - com detalhes
+        const redeMap: Record<string, { valor: number, detalhes: Array<{ cliente: string, nota: string }> }> = {};
+        devolucoes.forEach((curr) => {
             // Tentar obter rede de diferentes fontes
             let rede = curr.rede || 'Sem rede';
             
@@ -313,19 +337,30 @@ export function DashboardPage() {
             }
             
             const valor = Number(curr.valor_total_nota) || 0;
-            acc[rede] = (acc[rede] || 0) + valor;
-            return acc;
-        }, {});
+            if (!redeMap[rede]) {
+                redeMap[rede] = { valor: 0, detalhes: [] };
+            }
+            redeMap[rede].valor += valor;
+            redeMap[rede].detalhes.push({
+                cliente: curr.nome_cliente || 'Desconhecido',
+                nota: curr.numero || '-'
+            });
+        });
         
         const topRed = Object.entries(redeMap)
-            .map(([name, value]) => ({ name, value }))
+            .map(([name, data]) => ({ 
+                name, 
+                value: data.valor,
+                quantidade: data.detalhes.length,
+                detalhes: data.detalhes
+            }))
             .sort((a: any, b: any) => b.value - a.value)
             .slice(0, 5);
         setTopRedes(topRed);
         
-        // Gráfico de Pareto (80/20) - Clientes
+        // Gráfico de Pareto (80/20) - Clientes (usando customerMap que já tem detalhes)
         const sortedCustomers = Object.entries(customerMap)
-            .map(([name, value]) => ({ name, value: value as number }))
+            .map(([name, data]) => ({ name, value: data.valor, detalhes: data.detalhes }))
             .sort((a, b) => b.value - a.value);
         
         let cumulativeValue = 0;
@@ -337,7 +372,9 @@ export function DashboardPage() {
                 value: item.value,
                 cumulative: cumulativeValue,
                 percentage: (cumulativeValue / totalCustomerValue) * 100,
-                index: index + 1
+                index: index + 1,
+                quantidade: item.detalhes.length,
+                detalhes: item.detalhes
             };
         }).slice(0, 10);
         setParetoData(pareto);
@@ -485,7 +522,7 @@ export function DashboardPage() {
             if (!unidade) return null;
             const unidadeUpper = unidade.toUpperCase().trim();
             // CX = CX1 = CXS = FD
-            if (['CX', 'CX1', 'CXS', 'FD'].includes(unidadeUpper)) {
+            if (['CX', 'CX1', 'CXI', 'CXS', 'FD'].includes(unidadeUpper)) {
                 return 'CX';
             }
             // UN = UND = UN1 = UNID = BD = BDJ = KG = KG1 = KGS = PTC = PT = PT1 = PC = PC1 = SC = SC1
@@ -545,23 +582,35 @@ export function DashboardPage() {
         console.log('🔥 Top Produtos:', topProdutosList);
         setTopProdutos(topProdutosList);
         
-        // 8. Clientes com maior reincidência (TRATATIVA DE ANULAÇÃO e ANULADA/CANCELADA)
-        const clientesReincidenciaMap: Record<string, number> = {};
+        // 8. Clientes com maior reincidência (TRATATIVA DE ANULAÇÃO e ANULADA/CANCELADA) - com detalhes
+        const clientesReincidenciaMap: Record<string, { count: number, detalhes: Array<{ cliente: string, nota: string }> }> = {};
         devolucoes
             .filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO' || d.resultado === 'ANULADA/CANCELADA')
             .forEach((curr) => {
                 const cliente = curr.nome_cliente || 'Desconhecido';
-                clientesReincidenciaMap[cliente] = (clientesReincidenciaMap[cliente] || 0) + 1;
+                if (!clientesReincidenciaMap[cliente]) {
+                    clientesReincidenciaMap[cliente] = { count: 0, detalhes: [] };
+                }
+                clientesReincidenciaMap[cliente].count += 1;
+                clientesReincidenciaMap[cliente].detalhes.push({
+                    cliente: cliente,
+                    nota: curr.numero || '-'
+                });
             });
         
         const clientesReincidenciaList = Object.entries(clientesReincidenciaMap)
-            .map(([name, count]) => ({ name, count }))
+            .map(([name, data]) => ({ 
+                name, 
+                count: data.count,
+                quantidade: data.detalhes.length,
+                detalhes: data.detalhes
+            }))
             .sort((a: any, b: any) => b.count - a.count)
             .slice(0, 5);
         setClientesReincidencia(clientesReincidenciaList);
         
-        // 9. Motivos mais recorrentes por rede
-        const motivosPorRedeMap: Record<string, Record<string, number>> = {};
+        // 9. Motivos mais recorrentes por rede - com detalhes
+        const motivosPorRedeMap: Record<string, Record<string, { count: number, detalhes: Array<{ cliente: string, nota: string }> }>> = {};
         devolucoes.forEach((curr) => {
             const rede = curr.rede || 'Sem rede';
             const motivoNome = curr.motivos_devolucao?.nome || 'Não informado';
@@ -569,26 +618,35 @@ export function DashboardPage() {
             if (!motivosPorRedeMap[rede]) {
                 motivosPorRedeMap[rede] = {};
             }
-            motivosPorRedeMap[rede][motivoNome] = (motivosPorRedeMap[rede][motivoNome] || 0) + 1;
+            if (!motivosPorRedeMap[rede][motivoNome]) {
+                motivosPorRedeMap[rede][motivoNome] = { count: 0, detalhes: [] };
+            }
+            motivosPorRedeMap[rede][motivoNome].count += 1;
+            motivosPorRedeMap[rede][motivoNome].detalhes.push({
+                cliente: curr.nome_cliente || 'Desconhecido',
+                nota: curr.numero || '-'
+            });
         });
         
         // Transformar em array para gráfico (top 5 redes com seus motivos mais recorrentes)
         const motivosPorRedeList: any[] = [];
         Object.entries(motivosPorRedeMap)
             .sort((a, b) => {
-                const totalA = Object.values(a[1]).reduce((sum: number, val: any) => sum + val, 0);
-                const totalB = Object.values(b[1]).reduce((sum: number, val: any) => sum + val, 0);
+                const totalA = Object.values(a[1]).reduce((sum: number, val: any) => sum + val.count, 0);
+                const totalB = Object.values(b[1]).reduce((sum: number, val: any) => sum + val.count, 0);
                 return totalB - totalA;
             })
             .slice(0, 5)
             .forEach(([rede, motivos]) => {
                 const motivoMaisRecorrente = Object.entries(motivos)
-                    .sort((a: any, b: any) => b[1] - a[1])[0];
+                    .sort((a: any, b: any) => b[1].count - a[1].count)[0];
                 if (motivoMaisRecorrente) {
                     motivosPorRedeList.push({
                         rede: rede.length > 15 ? rede.substring(0, 15) + '...' : rede,
                         motivo: motivoMaisRecorrente[0].length > 20 ? motivoMaisRecorrente[0].substring(0, 20) + '...' : motivoMaisRecorrente[0],
-                        count: motivoMaisRecorrente[1]
+                        count: motivoMaisRecorrente[1].count,
+                        quantidade: motivoMaisRecorrente[1].detalhes.length,
+                        detalhes: motivoMaisRecorrente[1].detalhes
                     });
                 }
             });
@@ -709,6 +767,56 @@ export function DashboardPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Componente CustomTooltip para os gráficos
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+
+    const data = payload[0].payload;
+    // Suportar diferentes formatos: quantidade, count, ou value
+    const quantidade = data.quantidade || data.count || data.value || 0;
+    const detalhes = data.detalhes || [];
+    
+    // Se não houver detalhes mas houver valor, mostrar apenas o valor
+    const temDetalhes = detalhes && detalhes.length > 0;
+
+    return (
+      <div className="bg-card border border-border rounded-md p-3 shadow-md">
+        {/* Título */}
+        <p className="text-sm font-bold text-foreground mb-1">
+          Detalhes
+        </p>
+
+        {/* Quantidade/Valor */}
+        {data.value && typeof data.value === 'number' && data.value > 1000 ? (
+          <p className="text-sm font-bold text-primary">
+            R$ {data.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </p>
+        ) : (
+          <p className="text-sm font-bold text-primary">
+            {quantidade} {data.count !== undefined ? 'nota(s)' : data.value !== undefined ? 'ocorrência(s)' : 'item(s)'}
+          </p>
+        )}
+
+        {/* Lista de detalhes */}
+        {temDetalhes && (
+          <div className="mt-2 space-y-1 max-h-[200px] overflow-y-auto">
+            {detalhes.map((d: any, index: number) => (
+              <p key={index} className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {d.cliente}
+                </span>
+                <span className="mx-1">—</span>
+                <span className="text-primary">
+                  NF: {d.nota}
+                </span>
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   if (loading) {
@@ -866,17 +974,7 @@ export function DashboardPage() {
                   tick={<CustomXAxisTick />}
                 />
                 <YAxis className="text-[6px] font-bold" tickFormatter={(value) => `R$${value}`} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'var(--card)', 
-                    borderRadius: '8px', 
-                    border: '1px solid var(--border)',
-                    color: 'var(--foreground)',
-                    fontSize: '11px',
-                    fontWeight: 'bold'
-                  }}
-                  formatter={(value: number | undefined) => [`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor']}
-                />
+                <Tooltip content={<CustomTooltip />} />
                 <Bar dataKey="value" fill={CHART_COLORS[0]} radius={[8, 8, 0, 0]}>
                   <LabelList 
                     dataKey="value" 
@@ -918,17 +1016,7 @@ export function DashboardPage() {
                   tick={<CustomXAxisTick />}
                 />
                 <YAxis className="text-[10px] font-bold" tickFormatter={(value) => `R$${value}`} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'var(--card)', 
-                    borderRadius: '8px', 
-                    border: '1px solid var(--border)',
-                    color: 'var(--foreground)',
-                    fontSize: '11px',
-                    fontWeight: 'bold'
-                  }}
-                  formatter={(value: number | undefined) => [`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor']}
-                />
+                <Tooltip content={<CustomTooltip />} />
                 <Bar dataKey="value" fill={CHART_COLORS[1]} radius={[8, 8, 0, 0]}>
                   <LabelList 
                     dataKey="value" 
@@ -967,17 +1055,7 @@ export function DashboardPage() {
                   tick={<CustomXAxisTick />}
                 />
                 <YAxis className="text-[10px] font-bold" tickFormatter={(value) => `R$${value}`} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'var(--card)', 
-                    borderRadius: '8px', 
-                    border: '1px solid var(--border)',
-                    color: 'var(--foreground)',
-                    fontSize: '11px',
-                    fontWeight: 'bold'
-                  }}
-                  formatter={(value: number | undefined) => [`R$ ${(value || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor']}
-                />
+                <Tooltip content={<CustomTooltip />} />
                 <Bar dataKey="value" fill={CHART_COLORS[2]} radius={[8, 8, 0, 0]}>
                   <LabelList 
                     dataKey="value" 
@@ -1020,17 +1098,7 @@ export function DashboardPage() {
                   tick={<CustomXAxisTick />}
                 />
                 <YAxis className="text-[10px] font-bold" />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'var(--card)', 
-                    borderRadius: '8px', 
-                    border: '1px solid var(--border)',
-                    color: 'var(--foreground)',
-                    fontSize: '11px',
-                    fontWeight: 'bold'
-                  }}
-                  formatter={(value: number | undefined) => [`${value} nota(s)`, 'Quantidade']}
-                />
+                <Tooltip content={<CustomTooltip />} />
                 <Bar dataKey="count" fill={CHART_COLORS[3]} radius={[8, 8, 0, 0]}>
                   <LabelList 
                     dataKey="count" 
@@ -1071,20 +1139,7 @@ export function DashboardPage() {
                   width={100}
                   tick={<CustomXAxisTick />}
                 />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'var(--card)', 
-                    borderRadius: '8px', 
-                    border: '1px solid var(--border)',
-                    color: 'var(--foreground)',
-                    fontSize: '11px',
-                    fontWeight: 'bold'
-                  }}
-                  formatter={(value: number | undefined, payload: any) => [
-                    `${value} ocorrência(s) - Motivo: ${payload.motivo}`,
-                    'Quantidade'
-                  ]}
-                />
+                <Tooltip content={<CustomTooltip />} />
                 <Bar dataKey="count" fill={CHART_COLORS[4]} radius={[0, 8, 8, 0]}>
                   <LabelList 
                     dataKey="count" 
@@ -1127,23 +1182,7 @@ export function DashboardPage() {
                 />
                 <YAxis yAxisId="left" className="text-[10px] font-bold" tickFormatter={(value) => `R$${value}`} />
                 <YAxis yAxisId="right" orientation="right" className="text-[10px] font-bold" tickFormatter={(value) => `${value}%`} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'var(--card)', 
-                    borderRadius: '8px', 
-                    border: '1px solid var(--border)',
-                    color: 'var(--foreground)',
-                    fontSize: '11px',
-                    fontWeight: 'bold'
-                  }}
-                  formatter={(value: number | undefined, name: string | undefined) => {
-                    const val = value || 0;
-                    const nameStr = name || '';
-                    if (nameStr === 'value') return [`R$ ${val.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`, 'Valor'];
-                    if (nameStr === 'percentage') return [`${val.toFixed(1)}%`, 'Acumulado'];
-                    return [val, nameStr];
-                  }}
-                />
+                <Tooltip content={<CustomTooltip />} />
                 <Bar yAxisId="left" dataKey="value" fill={CHART_COLORS[0]} radius={[8, 8, 0, 0]}>
                   <LabelList 
                     dataKey="value" 
@@ -1249,58 +1288,64 @@ export function DashboardPage() {
 
       {/* Gráficos de Cancelamento e Canceladas */}
       {(cancelamentoData.length > 0 || canceladasData.length > 0) && (
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* Gráfico de Notas em Cancelamento */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <XCircle className="h-5 w-5 text-orange-500" />
-                Notas em Cancelamento
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {cancelamentoData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={cancelamentoData}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
-                    <XAxis 
-                      dataKey="name" 
-                      height={60}
-                      tick={<CustomXAxisTick />}
-                    />
-                    <YAxis className="text-[10px] font-bold" />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'var(--card)', 
-                        borderRadius: '8px', 
-                        border: '1px solid var(--border)',
-                        color: 'var(--foreground)',
-                        fontSize: '11px',
-                        fontWeight: 'bold'
-                      }}
-                      formatter={(value: number | undefined, _name: string | undefined, props: any) => {
-                        const detalhes = props.payload?.detalhes || [];
-                        const detalhesTexto = detalhes.map((d: any) => `${d.cliente} - NF: ${d.nota}`).join('\n');
-                        return [
-                          `${value || 0} nota(s)\n\n${detalhesTexto}`,
-                          'Detalhes'
-                        ];
-                      }}
-                    />
-                    <Bar dataKey="quantidade" fill={CHART_COLORS[0]} radius={[8, 8, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground text-center p-4">
-                  <XCircle className="h-10 w-10 mb-2 opacity-20" />
-                  <p className="text-sm">Nenhuma nota em cancelamento encontrada.</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          
-          {/* Gráfico de Notas Canceladas */}
-          <Card>
+  <div className="grid gap-4 md:grid-cols-2">
+    {/* Gráfico de Notas em Cancelamento */}
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <XCircle className="h-5 w-5 text-orange-500" />
+          Notas em Cancelamento
+        </CardTitle>
+      </CardHeader>
+
+      <CardContent>
+        {cancelamentoData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={cancelamentoData}>
+              <CartesianGrid
+                strokeDasharray="3 3"
+                className="stroke-muted/30"
+              />
+
+              <XAxis
+                dataKey="name"
+                height={60}
+                tick={<CustomXAxisTick />}
+              />
+
+              <YAxis className="text-[10px] font-bold" />
+
+              {/* Tooltip customizado */}
+              <Tooltip content={<CustomTooltip />} />
+
+              <Bar
+                dataKey="quantidade"
+                fill={CHART_COLORS[0]}
+                radius={[8, 8, 0, 0]}
+              >
+                <LabelList
+                  dataKey="quantidade"
+                  position="inside"
+                  fill="#f1f1e5"
+                  fontSize={13}
+                  fontWeight="bold"
+                />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-[300px] text-muted-foreground text-center p-4">
+            <XCircle className="h-10 w-10 mb-2 opacity-20" />
+            <p className="text-sm">
+              Nenhuma nota em cancelamento encontrada.
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+
+    {/* Gráfico de Notas Canceladas */}
+    <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <XCircle className="h-5 w-5 text-red-500" />
@@ -1318,24 +1363,7 @@ export function DashboardPage() {
                       tick={<CustomXAxisTick />}
                     />
                     <YAxis className="text-[10px] font-bold" />
-                    <Tooltip 
-                      contentStyle={{ 
-                        backgroundColor: 'var(--card)', 
-                        borderRadius: '8px', 
-                        border: '1px solid var(--border)',
-                        color: 'var(--foreground)',
-                        fontSize: '11px',
-                        fontWeight: 'bold'
-                      }}
-                      formatter={(value: number | undefined, _name: string | undefined, props: any) => {
-                        const detalhes = props.payload?.detalhes || [];
-                        const detalhesTexto = detalhes.map((d: any) => `${d.cliente} - NF: ${d.nota}`).join('\n');
-                        return [
-                          `${value || 0} nota(s)\n\n${detalhesTexto}`,
-                          'Detalhes'
-                        ];
-                      }}
-                    />
+                    <Tooltip content={<CustomTooltip />} />
                     <Bar dataKey="quantidade" fill={CHART_COLORS[1]} radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -1347,7 +1375,7 @@ export function DashboardPage() {
               )}
             </CardContent>
           </Card>
-        </div>
+      </div>
       )}
 
       {/* Secondary Charts Row */}
