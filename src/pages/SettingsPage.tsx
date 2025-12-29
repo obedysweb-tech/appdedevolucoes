@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { Plus, Trash2, Edit2 } from "lucide-react";
@@ -44,6 +44,11 @@ export function SettingsPage() {
   const [editVendedor, setEditVendedor] = useState<string>("");
   const [editPassword, setEditPassword] = useState("");
   
+  // Delete confirmation states
+  const [deletingUser, setDeletingUser] = useState<{id: string, name: string} | null>(null);
+  const [deletingReason, setDeletingReason] = useState<string | null>(null);
+  const [deletingVendedor, setDeletingVendedor] = useState<string | null>(null);
+  
   // New User State
   const [newUserName, setNewUserName] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
@@ -60,7 +65,7 @@ export function SettingsPage() {
       supabase.from('setores').select('*').order('nome'),
       supabase.from('motivos_devolucao').select('*, setor:setores(nome)').order('nome'),
       supabase.from('profiles').select('*').order('name'),
-      supabase.from('clientes').select('*').order('nome').limit(100),
+      supabase.from('clientes').select('*').order('nome'),
       supabase.from('devolucoes').select('vendedor').not('vendedor', 'is', null)
     ]);
     
@@ -132,15 +137,6 @@ export function SettingsPage() {
     }
   };
 
-  const handleDeleteReason = async (id: string) => {
-      const { error } = await supabase.from('motivos_devolucao').delete().eq('id', id);
-      if (error) {
-          toast.error("Erro ao excluir: " + error.message);
-      } else {
-          toast.success("Excluído com sucesso");
-          fetchData();
-      }
-  };
 
   const handleAddCliente = async () => {
     if (!newClienteNome || !newClienteNome.trim()) {
@@ -368,6 +364,10 @@ export function SettingsPage() {
         }
         
         console.log('🔄 Atualizando usuário:', editingUser.id, 'com dados:', updateData);
+        console.log('🔄 Usuário atual (ADMIN):', user?.email, 'role:', user?.role);
+        
+        // Atualizar também o updated_at
+        updateData.updated_at = new Date().toISOString();
         
         // Usar RPC ou update direto com permissões corretas
         const { error: profileError, data: updatedData } = await supabase
@@ -377,19 +377,32 @@ export function SettingsPage() {
           .select();
           
         if (profileError) {
-          console.error("Erro ao atualizar perfil:", profileError);
-          console.error("Detalhes do erro:", JSON.stringify(profileError, null, 2));
-          toast.error("Erro ao atualizar usuário: " + profileError.message);
+          console.error("❌ Erro ao atualizar perfil:", profileError);
+          console.error("❌ Detalhes do erro:", JSON.stringify(profileError, null, 2));
+          console.error("❌ Código do erro:", profileError.code);
+          console.error("❌ Mensagem:", profileError.message);
+          console.error("❌ Detalhes:", profileError.details);
+          console.error("❌ Hint:", profileError.hint);
+          
+          // Mensagem mais específica baseada no tipo de erro
+          if (profileError.code === '42501' || profileError.message?.includes('permission') || profileError.message?.includes('policy')) {
+            toast.error("Erro de permissão: Verifique se você tem permissão para atualizar este usuário. Apenas ADMINs podem atualizar outros perfis.");
+          } else {
+            toast.error("Erro ao atualizar usuário: " + (profileError.message || 'Erro desconhecido'));
+          }
           return;
         }
         
-        console.log('✅ Usuário atualizado com sucesso:', updatedData);
+        console.log('✅ Resposta do update:', updatedData);
         
         // Verificar se realmente foi atualizado
         if (!updatedData || updatedData.length === 0) {
-          toast.error("Usuário não foi atualizado. Verifique as permissões.");
+          console.error("❌ Update retornou array vazio - possível problema de RLS");
+          toast.error("Usuário não foi atualizado. Verifique se você tem permissão ADMIN para atualizar outros perfis.");
           return;
         }
+        
+        console.log('✅ Usuário atualizado com sucesso:', updatedData[0]);
         
         // Se houver nova senha, atualizar via auth
         // Nota: A alteração de senha de outro usuário requer admin API ou Edge Function
@@ -410,17 +423,15 @@ export function SettingsPage() {
       }
   };
   
-  const handleDeleteUser = async (userId: string, userName: string) => {
-    if (!confirm(`Tem certeza que deseja excluir o usuário "${userName}"? Esta ação não pode ser desfeita.`)) {
-      return;
-    }
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
     
     try {
       // Excluir o perfil (o registro no auth.users pode ser removido manualmente no Supabase Dashboard se necessário)
       const { error: profileError } = await supabase
         .from('profiles')
         .delete()
-        .eq('id', userId);
+        .eq('id', deletingUser.id);
         
       if (profileError) {
         toast.error("Erro ao excluir usuário: " + profileError.message);
@@ -428,10 +439,39 @@ export function SettingsPage() {
       }
       
       toast.success("Usuário excluído com sucesso! (Nota: O registro no Auth pode precisar ser removido manualmente no Supabase Dashboard)");
+      setDeletingUser(null);
       fetchData();
     } catch (error: any) {
       toast.error("Erro ao excluir usuário: " + error.message);
     }
+  };
+  
+  const handleDeleteReasonConfirm = async () => {
+    if (!deletingReason) return;
+    
+    try {
+      const { error } = await supabase
+        .from('motivos_devolucao')
+        .delete()
+        .eq('id', deletingReason);
+        
+      if (error) {
+        toast.error("Erro ao excluir: " + error.message);
+      } else {
+        toast.success("Excluído com sucesso");
+        setDeletingReason(null);
+        fetchData();
+      }
+    } catch (error: any) {
+      toast.error("Erro ao excluir: " + error.message);
+    }
+  };
+  
+  const handleDeleteVendedorConfirm = () => {
+    if (!deletingVendedor) return;
+    setVendedores(vendedores.filter(v => v !== deletingVendedor));
+    toast.success("Vendedor removido da lista!");
+    setDeletingVendedor(null);
   };
   
   const handleAddVendedor = async () => {
@@ -454,8 +494,9 @@ export function SettingsPage() {
     toast.success("Vendedor adicionado à lista!");
   };
 
-  if (user?.role !== 'ADMIN') {
-      return <div className="p-8 text-center">Acesso restrito a administradores.</div>;
+  // ADMIN e LOGISTICA têm acesso
+  if (user?.role !== 'ADMIN' && user?.role !== 'LOGISTICA') {
+      return <div className="p-8 text-center">Acesso restrito a administradores e logística.</div>;
   }
 
   return (
@@ -471,7 +512,10 @@ export function SettingsPage() {
               <TabsTrigger value="master-data" className="text-xs sm:text-sm whitespace-nowrap">Master Data (Setores/Motivos)</TabsTrigger>
               <TabsTrigger value="vendedores" className="text-xs sm:text-sm whitespace-nowrap">Vendedores</TabsTrigger>
               <TabsTrigger value="clientes" className="text-xs sm:text-sm whitespace-nowrap">Clientes</TabsTrigger>
-              <TabsTrigger value="users" className="text-xs sm:text-sm whitespace-nowrap">Usuários</TabsTrigger>
+              {/* Apenas ADMIN vê aba de Usuários */}
+              {user?.role === 'ADMIN' && (
+                  <TabsTrigger value="users" className="text-xs sm:text-sm whitespace-nowrap">Usuários</TabsTrigger>
+              )}
           </TabsList>
         </div>
 
@@ -560,8 +604,8 @@ export function SettingsPage() {
                                                     <Button 
                                                         variant="ghost" 
                                                         size="icon" 
-                                                        className="h-6 w-6 text-destructive"
-                                                        onClick={() => handleDeleteReason(reason.id)}
+                                                        className="h-6 w-6 text-destructive hover:bg-destructive/10"
+                                                        onClick={() => setDeletingReason(reason.id)}
                                                     >
                                                         <Trash2 className="h-3 w-3" />
                                                     </Button>
@@ -609,12 +653,8 @@ export function SettingsPage() {
                                             <Button 
                                                 variant="ghost" 
                                                 size="icon"
-                                                onClick={() => {
-                                                    if (confirm(`Remover "${vendedor}" da lista?`)) {
-                                                        setVendedores(vendedores.filter(v => v !== vendedor));
-                                                        toast.success("Vendedor removido da lista!");
-                                                    }
-                                                }}
+                                                className="hover:bg-destructive/10"
+                                                onClick={() => setDeletingVendedor(vendedor)}
                                             >
                                                 <Trash2 className="h-4 w-4 text-destructive" />
                                             </Button>
@@ -841,107 +881,25 @@ export function SettingsPage() {
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">
-                                                <Dialog>
-                                                    <DialogTrigger asChild>
-                                                        <Button 
-                                                            variant="ghost" 
-                                                            size="icon"
-                                                            onClick={() => {
-                                                                setEditingUser(u);
-                                                                setEditName(u.name);
-                                                                setEditRole(u.role);
-                                                                setEditVendedor((u as any).vendedor || '');
-                                                                setEditPassword("");
-                                                            }}
-                                                        >
-                                                            <Edit2 className="h-4 w-4" />
-                                                        </Button>
-                                                    </DialogTrigger>
-                                                <DialogContent>
-                                                    <DialogHeader>
-                                                        <DialogTitle>Editar Usuário</DialogTitle>
-                                                        <DialogDescription>
-                                                            Alterar permissões e dados de {u.name}
-                                                        </DialogDescription>
-                                                    </DialogHeader>
-                                                    <div className="space-y-4 py-4">
-                                                        <div className="space-y-2">
-                                                            <Label>Nome</Label>
-                                                            <Input 
-                                                                value={editName} 
-                                                                onChange={(e) => setEditName(e.target.value)} 
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label>Função (Role)</Label>
-                                                            <Select 
-                                                                value={editRole || ''} 
-                                                                onValueChange={(val: string) => {
-                                                                    setEditRole(val as UserRole);
-                                                                    // Se mudar para não-VENDEDOR, limpar vendedor
-                                                                    if (val !== 'VENDEDOR') {
-                                                                        setEditVendedor('');
-                                                                    }
-                                                                }}
-                                                            >
-                                                                <SelectTrigger>
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="ADMIN">ADMIN</SelectItem>
-                                                                    <SelectItem value="GESTOR">GESTOR</SelectItem>
-                                                                    <SelectItem value="COMERCIAL">COMERCIAL</SelectItem>
-                                                                    <SelectItem value="LOGISTICA">LOGISTICA</SelectItem>
-                                                                    <SelectItem value="VENDEDOR">VENDEDOR</SelectItem>
-                                                                    <SelectItem value="NOVO">NOVO (Sem Acesso)</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                        {editRole === 'VENDEDOR' && (
-                                                            <div className="space-y-2">
-                                                                <Label>Vendedor *</Label>
-                                                                <Select value={editVendedor} onValueChange={setEditVendedor}>
-                                                                    <SelectTrigger>
-                                                                        <SelectValue placeholder="Selecione o vendedor" />
-                                                                    </SelectTrigger>
-                                                                    <SelectContent>
-                                                                        {vendedores.map(v => (
-                                                                            <SelectItem key={v} value={v}>{v}</SelectItem>
-                                                                        ))}
-                                                                        {vendedores.length === 0 && (
-                                                                            <SelectItem value="" disabled>Nenhum vendedor cadastrado</SelectItem>
-                                                                        )}
-                                                                    </SelectContent>
-                                                                </Select>
-                                                            </div>
-                                                        )}
-                                                        <div className="space-y-2">
-                                                            <Label>Nova Senha (opcional)</Label>
-                                                            <Input 
-                                                                type="password"
-                                                                value={editPassword} 
-                                                                onChange={(e) => setEditPassword(e.target.value)}
-                                                                placeholder="Deixe em branco para manter a senha atual"
-                                                                minLength={6}
-                                                            />
-                                                            <p className="text-xs text-muted-foreground">
-                                                                Mínimo de 6 caracteres. Deixe em branco para não alterar.
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <DialogFooter>
-                                                        <Button variant="outline" onClick={() => {
-                                                            setEditingUser(null);
-                                                            setEditPassword("");
-                                                        }}>Cancelar</Button>
-                                                        <Button onClick={handleUpdateUser}>Salvar Alterações</Button>
-                                                    </DialogFooter>
-                                                </DialogContent>
-                                            </Dialog>
                                             <Button 
                                                 variant="ghost" 
                                                 size="icon"
-                                                onClick={() => handleDeleteUser(u.id, u.name)}
+                                                className="hover:bg-primary/10"
+                                                onClick={() => {
+                                                    setEditingUser(u);
+                                                    setEditName(u.name);
+                                                    setEditRole(u.role);
+                                                    setEditVendedor((u as any).vendedor || '');
+                                                    setEditPassword("");
+                                                }}
+                                            >
+                                                <Edit2 className="h-4 w-4 text-primary" />
+                                            </Button>
+                                            <Button 
+                                                variant="ghost" 
+                                                size="icon"
+                                                className="hover:bg-destructive/10"
+                                                onClick={() => setDeletingUser({id: u.id, name: u.name})}
                                                 disabled={u.id === user?.id}
                                             >
                                                 <Trash2 className="h-4 w-4 text-destructive" />
@@ -957,6 +915,218 @@ export function SettingsPage() {
             </Card>
         </TabsContent>
       </Tabs>
+      
+      {/* Modal de Confirmação de Exclusão de Usuário */}
+      <Dialog open={!!deletingUser} onOpenChange={(open) => !open && setDeletingUser(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5" />
+              Confirmar Exclusão
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Tem certeza que deseja excluir o usuário <span className="font-semibold text-foreground">"{deletingUser?.name}"</span>?
+            </DialogDescription>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mt-4">
+              <p className="text-sm text-destructive font-medium">
+                ⚠️ Esta ação não pode ser desfeita. O usuário perderá acesso ao sistema.
+              </p>
+            </div>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setDeletingUser(null)}
+              className="flex-1 sm:flex-initial"
+            >
+              Não
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteUser}
+              className="flex-1 sm:flex-initial"
+            >
+              Sim, Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Modal de Confirmação de Exclusão de Motivo */}
+      <Dialog open={!!deletingReason} onOpenChange={(open) => !open && setDeletingReason(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5" />
+              Confirmar Exclusão
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Tem certeza que deseja excluir este motivo de devolução?
+            </DialogDescription>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mt-4">
+              <p className="text-sm text-destructive font-medium">
+                ⚠️ Esta ação não pode ser desfeita.
+              </p>
+            </div>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setDeletingReason(null)}
+              className="flex-1 sm:flex-initial"
+            >
+              Não
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteReasonConfirm}
+              className="flex-1 sm:flex-initial"
+            >
+              Sim, Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Modal de Confirmação de Exclusão de Vendedor */}
+      <Dialog open={!!deletingVendedor} onOpenChange={(open) => !open && setDeletingVendedor(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5" />
+              Confirmar Exclusão
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Tem certeza que deseja remover o vendedor <span className="font-semibold text-foreground">"{deletingVendedor}"</span> da lista?
+            </DialogDescription>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mt-4">
+              <p className="text-sm text-destructive font-medium">
+                ⚠️ Esta ação não pode ser desfeita.
+              </p>
+            </div>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setDeletingVendedor(null)}
+              className="flex-1 sm:flex-initial"
+            >
+              Não
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteVendedorConfirm}
+              className="flex-1 sm:flex-initial"
+            >
+              Sim, Remover
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Modal de Edição de Usuário - Melhorado */}
+      <Dialog open={!!editingUser} onOpenChange={(open) => {
+        if (!open) {
+          setEditingUser(null);
+          setEditPassword("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Edit2 className="h-5 w-5 text-primary" />
+              Editar Usuário
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Alterar permissões e dados de <span className="font-semibold text-foreground">{editingUser?.name}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Nome</Label>
+              <Input 
+                value={editName} 
+                onChange={(e) => setEditName(e.target.value)}
+                className="h-10"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Função (Role)</Label>
+              <Select 
+                value={editRole || ''} 
+                onValueChange={(val: string) => {
+                  setEditRole(val as UserRole);
+                  if (val !== 'VENDEDOR') {
+                    setEditVendedor('');
+                  }
+                }}
+              >
+                <SelectTrigger className="h-10">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ADMIN">ADMIN</SelectItem>
+                  <SelectItem value="GESTOR">GESTOR</SelectItem>
+                  <SelectItem value="COMERCIAL">COMERCIAL</SelectItem>
+                  <SelectItem value="LOGISTICA">LOGISTICA</SelectItem>
+                  <SelectItem value="VENDEDOR">VENDEDOR</SelectItem>
+                  <SelectItem value="NOVO">NOVO (Sem Acesso)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {editRole === 'VENDEDOR' && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Vendedor *</Label>
+                <Select value={editVendedor} onValueChange={setEditVendedor}>
+                  <SelectTrigger className="h-10">
+                    <SelectValue placeholder="Selecione o vendedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {vendedores.map(v => (
+                      <SelectItem key={v} value={v}>{v}</SelectItem>
+                    ))}
+                    {vendedores.length === 0 && (
+                      <SelectItem value="" disabled>Nenhum vendedor cadastrado</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Nova Senha (opcional)</Label>
+              <Input 
+                type="password"
+                value={editPassword} 
+                onChange={(e) => setEditPassword(e.target.value)}
+                placeholder="Deixe em branco para manter a senha atual"
+                minLength={6}
+                className="h-10"
+              />
+              <p className="text-xs text-muted-foreground">
+                Mínimo de 6 caracteres. Deixe em branco para não alterar.
+              </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => {
+                setEditingUser(null);
+                setEditPassword("");
+              }}
+              className="flex-1 sm:flex-initial"
+            >
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleUpdateUser}
+              className="flex-1 sm:flex-initial bg-primary hover:bg-primary/90"
+            >
+              Salvar Alterações
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

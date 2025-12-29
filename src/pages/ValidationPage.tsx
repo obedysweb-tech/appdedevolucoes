@@ -18,6 +18,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Loader2, AlertCircle, Save, ArrowUpDown, ArrowUp, ArrowDown, FileText, Trash2, Edit, Share2, CheckSquare, Square, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { format } from "date-fns";
@@ -68,7 +71,6 @@ export function ValidationPage() {
   const [allData, setAllData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [motivos, setMotivos] = useState<any[]>([]);
-  const [setores, setSetores] = useState<any[]>([]);
   const [comentarios, setComentarios] = useState<Record<string, string>>({});
   const [savingComment, setSavingComment] = useState<Record<string, boolean>>({});
   const [currentPage, setCurrentPage] = useState(1);
@@ -76,6 +78,8 @@ export function ValidationPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [editingItem, setEditingItem] = useState<any | null>(null);
+  const [deletingItem, setDeletingItem] = useState<string | null>(null);
+  const [deletingMultiple, setDeletingMultiple] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [stats, setStats] = useState({
     nfPendentes: 0,
@@ -93,7 +97,6 @@ export function ValidationPage() {
 
   useEffect(() => {
     fetchMotivos();
-    fetchSetores();
     fetchReturns();
     // Resetar ordenação e página quando filtros mudarem
     setSortField(null);
@@ -156,16 +159,6 @@ export function ValidationPage() {
     }
   };
 
-  const fetchSetores = async () => {
-    const { data: setoresData } = await supabase
-      .from('setores')
-      .select('id, nome')
-      .order('nome');
-    
-    if (setoresData) {
-      setSetores(setoresData);
-    }
-  };
 
   const fetchReturns = async () => {
     setLoading(true);
@@ -309,10 +302,10 @@ export function ValidationPage() {
               console.warn('Item sem ID:', prod);
             }
             return {
-              ...prod,
+            ...prod,
               id: prod.id, // Garantir que o id está presente
               motivo_id: prod.motivo_id || null, // Preservar motivo_id do banco
-              motivo_nome: prod.motivo_item?.nome || '-'
+            motivo_nome: prod.motivo_item?.nome || '-'
             };
           });
           
@@ -824,7 +817,7 @@ export function ValidationPage() {
 
     try {
       const nomeValidador = user.name || user.email || '-';
-      
+
       console.log('Salvando motivo:', { itemId: itemIdString, motivoId, devolucaoId: devolucaoIdString });
 
       // Verificar se o item existe antes de atualizar
@@ -1162,16 +1155,15 @@ export function ValidationPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!user) return;
-    if (!confirm('Tem certeza que deseja excluir este registro?')) return;
+  const handleDelete = async () => {
+    if (!deletingItem || !user) return;
 
     try {
       // Deletar itens primeiro
       const { error: itemsError } = await supabase
         .from('itens_devolucao')
         .delete()
-        .eq('devolucao_id', id);
+        .eq('devolucao_id', deletingItem);
 
       if (itemsError) throw itemsError;
 
@@ -1179,11 +1171,12 @@ export function ValidationPage() {
       const { error: deleteError } = await supabase
         .from('devolucoes')
         .delete()
-        .eq('id', id);
+        .eq('id', deletingItem);
 
       if (deleteError) throw deleteError;
 
       toast.success('Registro excluído com sucesso!');
+      setDeletingItem(null);
       fetchReturns(); // Recarregar dados
       setSelectedItems(new Set());
     } catch (error: any) {
@@ -1197,7 +1190,10 @@ export function ValidationPage() {
       return;
     }
 
-    if (!confirm(`Tem certeza que deseja excluir ${selectedItems.size} registro(s)?`)) return;
+    if (!deletingMultiple) {
+      setDeletingMultiple(true);
+      return;
+    }
 
     try {
       const ids = Array.from(selectedItems);
@@ -1219,11 +1215,13 @@ export function ValidationPage() {
       if (error) throw error;
 
       toast.success(`${ids.length} registro(s) excluído(s) com sucesso!`);
+      setDeletingMultiple(false);
       fetchReturns(); // Recarregar dados
       setSelectedItems(new Set());
       setIsSelectMode(false);
     } catch (error: any) {
       toast.error("Erro ao excluir registros: " + error.message);
+      setDeletingMultiple(false);
     }
   };
 
@@ -1794,7 +1792,7 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
         <FilterBar />
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto shrink-0">
           {isSelectMode && selectedItems.size > 0 && (
-            <Button variant="destructive" onClick={handleDeleteMultiple} className="w-full sm:w-auto">
+            <Button variant="destructive" onClick={() => setDeletingMultiple(true)} className="w-full sm:w-auto" disabled={selectedItems.size === 0}>
               <Trash2 className="mr-2 h-4 w-4" />
               Excluir ({selectedItems.size})
             </Button>
@@ -1905,7 +1903,7 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                 <p>Nenhuma devolução encontrada.</p>
             </div>
         ) : (
-        <>
+        <div>
         {/* Paginação no topo */}
         {allData.length > itemsPerPage && (
           <div className="flex items-center justify-between px-4 py-3 border-b">
@@ -1937,101 +1935,102 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
             </div>
           </div>
         )}
-        <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {isSelectMode && (
-                <TableHead className="w-[50px]">
-                  <button onClick={toggleSelectAll} className="p-1 hover:bg-muted rounded">
-                    {selectedItems.size === data.length && data.length > 0 ? (
-                      <CheckSquare className="h-4 w-4" />
-                    ) : (
-                      <Square className="h-4 w-4" />
-                    )}
-                  </button>
+        {/* Tabela com layout melhorado */}
+        <div className="overflow-x-auto border rounded-lg">
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow>
+                {isSelectMode && (
+                  <TableHead className="w-[50px] sticky left-0 bg-muted/50 z-10">
+                    <button onClick={toggleSelectAll} className="p-1 hover:bg-muted rounded">
+                      {selectedItems.size === data.length && data.length > 0 ? (
+                        <CheckSquare className="h-4 w-4" />
+                      ) : (
+                        <Square className="h-4 w-4" />
+                      )}
+                    </button>
+                  </TableHead>
+                )}
+                <TableHead className="w-[50px] sticky left-0 bg-muted/50 z-10"></TableHead>
+                <TableHead className="min-w-[100px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('data_emissao')}>
+                  <div className="flex items-center gap-1">
+                    Data Emissão
+                    <SortIcon field="data_emissao" />
+                  </div>
                 </TableHead>
-              )}
-              <TableHead className="w-[50px]"></TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('data_emissao')}>
-                <div className="flex items-center">
-                  Data Emissão
-                  <SortIcon field="data_emissao" />
-                </div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('numero')}>
-                <div className="flex items-center">
-                  Nota Fiscal
-                  <SortIcon field="numero" />
-                </div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('nome_cliente')}>
-                <div className="flex items-center">
-                  Cliente
-                  <SortIcon field="nome_cliente" />
-                </div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('cidade_origem')}>
-                <div className="flex items-center">
-                  Origem
-                  <SortIcon field="cidade_origem" />
-                </div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('vendedor')}>
-                <div className="flex items-center">
-                  Vendedor
-                  <SortIcon field="vendedor" />
-                </div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('motivo')}>
-                <div className="flex items-center">
-                  Motivo
-                  <SortIcon field="motivo" />
-                </div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('valor_total_nota')}>
-                <div className="flex items-center">
-                  Valor Total
-                  <SortIcon field="valor_total_nota" />
-                </div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('dias')}>
-                <div className="flex items-center">
-                  Dias
-                  <SortIcon field="dias" />
-                </div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('prazo')}>
-                <div className="flex items-center">
-                  Prazo
-                  <SortIcon field="prazo" />
-                </div>
-              </TableHead>
-              <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('resultado')}>
-                <div className="flex items-center">
-                  Resultado
-                  <SortIcon field="resultado" />
-                </div>
-              </TableHead>
-              <TableHead className="text-[10px] px-2">Validado Por</TableHead>
-              <TableHead className="text-[10px] px-2">Comentário</TableHead>
-              <TableHead className="w-[120px] text-[10px] px-2">Ações</TableHead>
-            </TableRow>
-          </TableHeader>
+                <TableHead className="min-w-[120px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('numero')}>
+                  <div className="flex items-center gap-1">
+                    Nota Fiscal
+                    <SortIcon field="numero" />
+                  </div>
+                </TableHead>
+                <TableHead className="min-w-[200px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('nome_cliente')}>
+                  <div className="flex items-center gap-1">
+                    Cliente
+                    <SortIcon field="nome_cliente" />
+                  </div>
+                </TableHead>
+                <TableHead className="min-w-[150px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('cidade_origem')}>
+                  <div className="flex items-center gap-1">
+                    Origem
+                    <SortIcon field="cidade_origem" />
+                  </div>
+                </TableHead>
+                <TableHead className="min-w-[150px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('vendedor')}>
+                  <div className="flex items-center gap-1">
+                    Vendedor
+                    <SortIcon field="vendedor" />
+                  </div>
+                </TableHead>
+                <TableHead className="min-w-[150px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('motivo')}>
+                  <div className="flex items-center gap-1">
+                    Motivo
+                    <SortIcon field="motivo" />
+                  </div>
+                </TableHead>
+                <TableHead className="min-w-[100px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('valor_total_nota')}>
+                  <div className="flex items-center gap-1">
+                    Valor Total
+                    <SortIcon field="valor_total_nota" />
+                  </div>
+                </TableHead>
+                <TableHead className="min-w-[60px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('dias')}>
+                  <div className="flex items-center gap-1">
+                    Dias
+                    <SortIcon field="dias" />
+                  </div>
+                </TableHead>
+                <TableHead className="min-w-[100px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('prazo')}>
+                  <div className="flex items-center gap-1">
+                    Prazo
+                    <SortIcon field="prazo" />
+                  </div>
+                </TableHead>
+                <TableHead className="min-w-[120px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('resultado')}>
+                  <div className="flex items-center gap-1">
+                    Resultado
+                    <SortIcon field="resultado" />
+                  </div>
+                </TableHead>
+                <TableHead className="min-w-[150px] text-xs font-semibold px-3 py-3">Validado Por</TableHead>
+                <TableHead className="min-w-[200px] text-xs font-semibold px-3 py-3">Comentário</TableHead>
+                <TableHead className="min-w-[120px] text-xs font-semibold px-3 py-3">Ações</TableHead>
+              </TableRow>
+            </TableHeader>
           <TableBody>
             {data.map((item) => {
               const resultado = (item.resultado || 'PENDENTE VALIDAÇÃO') as ResultadoStatus;
               
               return (
-              <TableRow key={item.id} className="group">
-                <TableCell colSpan={isSelectMode ? 15 : 14} className="p-0 border-b">
+              <TableRow key={item.id} className="group hover:bg-muted/30">
+                <TableCell colSpan={isSelectMode ? 15 : 14} className="p-0">
                     <Accordion type="single" collapsible className="w-full">
-                        <AccordionItem value={item.id} className="border-b-0">
-                            <div className="flex items-center w-full py-2 px-4 hover:bg-muted/50">
+                        <AccordionItem value={item.id} className="border-0">
+                            <div className="flex items-center w-full py-3 px-3 hover:bg-muted/50 transition-colors">
                                 {isSelectMode && (
                                   <button 
                                     onClick={() => toggleSelectItem(item.id)}
-                                    className="w-[50px] flex items-center justify-center"
+                                    className="w-[50px] flex items-center justify-center flex-shrink-0"
                                   >
                                     {selectedItems.has(item.id) ? (
                                       <CheckSquare className="h-4 w-4 text-primary" />
@@ -2040,15 +2039,15 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                     )}
                                   </button>
                                 )}
-                                <div className="flex gap-2 w-full items-center text-[10px]">
-                                    <AccordionTrigger className="w-[50px] py-0 pr-4 hover:no-underline flex-shrink-0">
+                                <div className="flex items-center gap-3 w-full text-xs">
+                                    <AccordionTrigger className="w-[50px] py-0 pr-2 hover:no-underline flex-shrink-0">
                                         {/* Trigger Icon is automatic */}
                                     </AccordionTrigger>
-                                    <div className="w-20">{item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</div>
-                                    <div className="w-20 font-medium">{item.numero}</div>
-                                    <div className="w-32 truncate" title={item.nome_cliente}>{item.nome_cliente}</div>
-                                    <div className="w-20">{item.cidade_origem}/{item.uf_origem}</div>
-                                    <div className="w-24 truncate" title={item.vendedor}>{item.vendedor}</div>
+                                    <div className="min-w-[100px] text-xs">{item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</div>
+                                    <div className="min-w-[120px] font-medium text-xs">{item.numero}</div>
+                                    <div className="min-w-[200px] truncate text-xs" title={item.nome_cliente}>{item.nome_cliente}</div>
+                                    <div className="min-w-[150px] text-xs">{item.cidade_origem}/{item.uf_origem}</div>
+                                    <div className="min-w-[150px] truncate text-xs" title={item.vendedor}>{item.vendedor}</div>
                                     <div 
                                       className="w-40"
                                       style={{ position: 'relative', zIndex: 10000 }}
@@ -2225,7 +2224,7 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                             className="h-7 px-1"
                                             onClick={(e) => {
                                               e.stopPropagation();
-                                              handleDelete(item.id);
+                                              setDeletingItem(item.id);
                                             }}
                                             title="Excluir"
                                           >
@@ -2395,117 +2394,167 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
             </div>
           </div>
         )}
-        </>
+        </div>
         )}
       </div>
 
-      {/* Modal de Edição */}
+      {/* Modal de Confirmação de Exclusão */}
+      <Dialog open={!!deletingItem} onOpenChange={(open) => !open && setDeletingItem(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5" />
+              Confirmar Exclusão
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Tem certeza que deseja excluir este registro?
+            </DialogDescription>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mt-4">
+              <p className="text-sm text-destructive font-medium">
+                ⚠️ Esta ação não pode ser desfeita.
+              </p>
+            </div>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setDeletingItem(null)}
+              className="flex-1 sm:flex-initial"
+            >
+              Não
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDelete}
+              className="flex-1 sm:flex-initial"
+            >
+              Sim, Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Modal de Confirmação de Exclusão Múltipla */}
+      <Dialog open={deletingMultiple} onOpenChange={(open) => !open && setDeletingMultiple(false)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5" />
+              Confirmar Exclusão
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Tem certeza que deseja excluir <span className="font-semibold text-foreground">{selectedItems.size} registro(s)</span>?
+            </DialogDescription>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mt-4">
+              <p className="text-sm text-destructive font-medium">
+                ⚠️ Esta ação não pode ser desfeita.
+              </p>
+            </div>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setDeletingMultiple(false)}
+              className="flex-1 sm:flex-initial"
+            >
+              Não
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDeleteMultiple}
+              className="flex-1 sm:flex-initial"
+            >
+              Sim, Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* Modal de Edição - Melhorado */}
+      <Dialog open={!!editingItem} onOpenChange={(open) => !open && setEditingItem(null)}>
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Edit className="h-5 w-5 text-primary" />
+              Editar Registro
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Alterar informações da nota fiscal
+            </DialogDescription>
+          </DialogHeader>
       {editingItem && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold mb-4">Editar Registro</h2>
-            <div className="space-y-4">
+            <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium">Número da Nota</label>
-                  <input
-                    type="text"
-                    className="w-full border rounded px-3 py-2"
+                <div className="space-y-2">
+                  <Label>Número da Nota</Label>
+                  <Input
                     value={editingItem.numero || ''}
                     onChange={(e) => setEditingItem({ ...editingItem, numero: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium">Cliente</label>
-                  <input
-                    type="text"
-                    className="w-full border rounded px-3 py-2"
+                <div className="space-y-2">
+                  <Label>Cliente</Label>
+                  <Input
                     value={editingItem.nome_cliente || ''}
                     onChange={(e) => setEditingItem({ ...editingItem, nome_cliente: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium">Vendedor</label>
-                  <input
-                    type="text"
-                    className="w-full border rounded px-3 py-2"
+                <div className="space-y-2">
+                  <Label>Vendedor</Label>
+                  <Input
                     value={editingItem.vendedor || ''}
                     onChange={(e) => setEditingItem({ ...editingItem, vendedor: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium">Cidade Origem</label>
-                  <input
-                    type="text"
-                    className="w-full border rounded px-3 py-2"
+                <div className="space-y-2">
+                  <Label>Cidade Origem</Label>
+                  <Input
                     value={editingItem.cidade_origem || ''}
                     onChange={(e) => setEditingItem({ ...editingItem, cidade_origem: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium">UF Origem</label>
-                  <input
-                    type="text"
-                    className="w-full border rounded px-3 py-2"
+                <div className="space-y-2">
+                  <Label>UF Origem</Label>
+                  <Input
                     value={editingItem.uf_origem || ''}
                     onChange={(e) => setEditingItem({ ...editingItem, uf_origem: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label className="text-sm font-medium">Data de Emissão</label>
-                  <input
+                <div className="space-y-2">
+                  <Label>Data de Emissão</Label>
+                  <Input
                     type="date"
-                    className="w-full border rounded px-3 py-2"
-                    value={editingItem.data_emissao ? format(new Date(editingItem.data_emissao), 'yyyy-MM-dd') : ''}
+                    value={editingItem.data_emissao ? new Date(editingItem.data_emissao).toISOString().split('T')[0] : ''}
                                     onChange={(e) => setEditingItem({ ...editingItem, data_emissao: e.target.value })}
                                   />
                                 </div>
-                                <div>
-                                  <label className="text-sm font-medium">Valor Total</label>
-                                  <input
+                <div className="space-y-2">
+                  <Label>Valor Total</Label>
+                  <Input
                                     type="number"
                                     step="0.01"
-                                    className="w-full border rounded px-3 py-2"
                                     value={editingItem.valor_total_nota || ''}
                                     onChange={(e) => setEditingItem({ ...editingItem, valor_total_nota: e.target.value })}
                                   />
                                 </div>
-                                <div>
-                                  <label className="text-sm font-medium">Peso Líquido</label>
-                                  <input
+                <div className="space-y-2">
+                  <Label>Peso Líquido</Label>
+                  <Input
                                     type="number"
                                     step="0.01"
-                                    className="w-full border rounded px-3 py-2"
                                     value={editingItem.peso_liquido || ''}
                                     onChange={(e) => setEditingItem({ ...editingItem, peso_liquido: e.target.value })}
                                   />
                                 </div>
-                                <div>
-                                  <label className="text-sm font-medium">Setor</label>
-                                  <Select
-                                    value={editingItem.setor_id || ''}
-                                    onValueChange={(value) => setEditingItem({ ...editingItem, setor_id: value })}
-                                  >
-                                    <SelectTrigger className="w-full">
-                                      <SelectValue placeholder="Selecione o setor..." />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {setores.map((setor) => (
-                                        <SelectItem key={setor.id} value={setor.id}>
-                                          {setor.nome}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
                                 </div>
-                                <div>
-                                  <label className="text-sm font-medium">Motivo</label>
+              <div className="space-y-2">
+                <Label>Motivo Principal</Label>
                                   <Select
                                     value={editingItem.motivo_id || ''}
                                     onValueChange={(value) => setEditingItem({ ...editingItem, motivo_id: value })}
                                   >
-                                    <SelectTrigger className="w-full">
-                                      <SelectValue placeholder="Selecione o motivo..." />
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um motivo" />
                                     </SelectTrigger>
                                     <SelectContent>
                                       {motivos.map((motivo) => (
@@ -2516,45 +2565,32 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                     </SelectContent>
                                   </Select>
                                 </div>
-                                <div>
-                                  <label className="text-sm font-medium">Resultado</label>
-                                  <Select
-                                    value={editingItem.resultado || 'PENDENTE VALIDAÇÃO'}
-                                    onValueChange={(value) => setEditingItem({ ...editingItem, resultado: value })}
-                                  >
-                                    <SelectTrigger className="w-full">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value="PENDENTE VALIDAÇÃO">PENDENTE VALIDAÇÃO</SelectItem>
-                                      <SelectItem value="VALIDADA">VALIDADA</SelectItem>
-                                      <SelectItem value="LANÇADA">LANÇADA</SelectItem>
-                                      <SelectItem value="TRATATIVA DE ANULAÇÃO">TRATATIVA DE ANULAÇÃO</SelectItem>
-                                      <SelectItem value="ANULADA/CANCELADA">ANULADA/CANCELADA</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              </div>
-                              <div>
-                                <label className="text-sm font-medium">Justificativa</label>
+              <div className="space-y-2">
+                <Label>Justificativa</Label>
                                 <Textarea
-                                  className="w-full border rounded px-3 py-2"
                                   value={editingItem.justificativa || ''}
                                   onChange={(e) => setEditingItem({ ...editingItem, justificativa: e.target.value })}
                                 />
                               </div>
-                              <div className="flex gap-2 justify-end">
-                                <Button variant="outline" onClick={() => setEditingItem(null)}>
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setEditingItem(null)}
+              className="flex-1 sm:flex-initial"
+            >
                                   Cancelar
                                 </Button>
-                                <Button onClick={handleSaveEdit}>
-                                  Salvar
+            <Button 
+              onClick={handleSaveEdit}
+              className="flex-1 sm:flex-initial bg-primary hover:bg-primary/90"
+            >
+              Salvar Alterações
                                 </Button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
                     </div>
                   );
                 }

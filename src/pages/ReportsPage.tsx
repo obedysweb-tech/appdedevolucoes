@@ -17,6 +17,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { supabase } from "@/lib/supabase";
 import { useFilterStore, useAuthStore } from "@/lib/store";
 import { getDateRangeFromPeriod } from "@/lib/dateUtils";
@@ -48,6 +49,7 @@ export function ReportsPage() {
   const [filteredData, setFilteredData] = useState<any[]>([]); // Dados filtrados para exibição na tela
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  const [deletingItem, setDeletingItem] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const itemsPerPage = 100;
@@ -1059,15 +1061,15 @@ export function ReportsPage() {
     return <ArrowDown className="ml-1 h-4 w-4" />;
   };
 
-  const handleDelete = async (id: string) => {
-    if (!user) return;
+  const handleDelete = async () => {
+    if (!deletingItem || !user) return;
 
     try {
       // Deletar itens primeiro
       const { error: itemsError } = await supabase
         .from('itens_devolucao')
         .delete()
-        .eq('devolucao_id', id);
+        .eq('devolucao_id', deletingItem);
 
       if (itemsError) throw itemsError;
 
@@ -1075,11 +1077,12 @@ export function ReportsPage() {
       const { error: deleteError } = await supabase
         .from('devolucoes')
         .delete()
-        .eq('id', id);
+        .eq('id', deletingItem);
 
       if (deleteError) throw deleteError;
 
       toast.success('Registro excluído com sucesso!');
+      setDeletingItem(null);
       fetchReportData(); // Recarregar dados
     } catch (error: any) {
       toast.error("Erro ao excluir registro: " + error.message);
@@ -1488,9 +1491,7 @@ export function ReportsPage() {
                                                                         className="h-7 px-1"
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
-                                                                            if (confirm('Tem certeza que deseja excluir este registro?')) {
-                                                                                handleDelete(item.id);
-                                                                            }
+                                                                            setDeletingItem(item.id)
                                                                         }}
                                                                         title="Excluir"
                                                                     >
@@ -1615,6 +1616,42 @@ export function ReportsPage() {
           </div>
         </div>
       )}
+      
+      {/* Modal de Confirmação de Exclusão */}
+      <Dialog open={!!deletingItem} onOpenChange={(open) => !open && setDeletingItem(null)}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold text-destructive flex items-center gap-2">
+              <Trash2 className="h-5 w-5" />
+              Confirmar Exclusão
+            </DialogTitle>
+            <DialogDescription className="pt-2">
+              Tem certeza que deseja excluir este registro?
+            </DialogDescription>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mt-4">
+              <p className="text-sm text-destructive font-medium">
+                ⚠️ Esta ação não pode ser desfeita.
+              </p>
+            </div>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button 
+              variant="outline" 
+              onClick={() => setDeletingItem(null)}
+              className="flex-1 sm:flex-initial"
+            >
+              Não
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleDelete}
+              className="flex-1 sm:flex-initial"
+            >
+              Sim, Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

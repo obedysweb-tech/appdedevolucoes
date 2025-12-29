@@ -7,14 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { User, Mail, Shield, BarChart3, History, TrendingUp, Package } from "lucide-react";
+import { User, Mail, Shield, BarChart3, History, TrendingUp, Package, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { FilterBar } from "@/components/filters/FilterBar";
 import { 
   LineChart, 
   Line, 
@@ -35,6 +34,9 @@ export function ProfilePage() {
   const [newPassword, setNewPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLogsPage, setAuditLogsPage] = useState(1);
+  const [auditLogsTotal, setAuditLogsTotal] = useState(0);
+  const auditLogsPerPage = 100;
   
   // Stats State
   const [stats, setStats] = useState({
@@ -55,26 +57,28 @@ export function ProfilePage() {
   useEffect(() => {
     if (user) {
         fetchUserStats();
-        if (user.role === 'ADMIN' || user.role === 'GESTOR') {
+        // ADMIN, COMERCIAL e LOGISTICA veem histórico
+        if (user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA') {
             fetchAuditLogs();
         }
-        if (user.role === 'ADMIN') {
+        // ADMIN, COMERCIAL e LOGISTICA veem KPIs
+        if (user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA') {
             fetchUserKPIs();
         }
     }
-  }, [user, filters]); // Recalcula quando mudar o filtro de data
+  }, [user, filters, auditLogsPage]); // Recalcula quando mudar o filtro de data ou página
 
   const fetchUserStats = async () => {
       if (!user) return;
 
-      // Se ADMIN, buscar TODAS as devoluções (dados gerais)
-      // Se não ADMIN, buscar devoluções do usuário atual
+      // ADMIN e COMERCIAL veem TODAS as devoluções (dados gerais)
+      // Se não ADMIN/COMERCIAL, buscar devoluções do usuário atual
       let userQuery = supabase
         .from('devolucoes')
         .select('*');
       
-      if (user.role === 'ADMIN') {
-        // ADMIN vê tudo - não filtrar por usuário
+      if (user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA') {
+        // ADMIN, COMERCIAL e LOGISTICA veem tudo - não filtrar por usuário
       } else if (user.role === 'VENDEDOR' && user.vendedor) {
         userQuery = userQuery.eq('vendedor', user.vendedor);
       } else {
@@ -185,7 +189,7 @@ export function ProfilePage() {
   };
 
   const fetchUserKPIs = async () => {
-      if (!user || user.role !== 'ADMIN') return;
+      if (!user || (user.role !== 'ADMIN' && user.role !== 'COMERCIAL' && user.role !== 'LOGISTICA')) return;
       
       try {
         // Buscar todos os usuários VENDEDOR
@@ -282,11 +286,19 @@ export function ProfilePage() {
             usuario.tempoMedioValidacao = Math.round(usuario.tempoMedioValidacao / usuario.totalValidacoes);
           }
           
-          // Calcular dias em atraso: diferença entre última validação e hoje
-          if (usuario.ultimaValidacao) {
-            const ultimaValidacaoDate = new Date(usuario.ultimaValidacao);
-            ultimaValidacaoDate.setHours(0, 0, 0, 0);
-            usuario.diasAtraso = Math.floor((hoje.getTime() - ultimaValidacaoDate.getTime()) / (1000 * 60 * 60 * 24));
+          // Calcular dias em atraso: média do campo "dias" de notas com PENDENTE VALIDAÇÃO e prazo EM ATRASO
+          // Buscar notas do vendedor com esses critérios
+          const notasAtraso = devolucoes.filter((devol: any) => 
+            devol.vendedor === vendedor &&
+            devol.resultado === 'PENDENTE VALIDAÇÃO' &&
+            devol.prazo === 'EM ATRASO' &&
+            devol.dias != null &&
+            devol.dias > 0
+          );
+          
+          if (notasAtraso.length > 0) {
+            const somaDias = notasAtraso.reduce((sum: number, devol: any) => sum + (Number(devol.dias) || 0), 0);
+            usuario.diasAtraso = Math.round(somaDias / notasAtraso.length);
           } else {
             usuario.diasAtraso = 0;
           }
@@ -601,6 +613,31 @@ export function ProfilePage() {
   };
 
   const fetchAuditLogs = async () => {
+      console.log('📋 fetchAuditLogs - Iniciando busca de logs para role:', user?.role);
+      
+      // Primeiro, contar total de registros
+      let countQuery = supabase
+        .from('logs_validacao')
+        .select('*', { count: 'exact', head: true });
+      
+      if (filters.startDate) {
+          countQuery = countQuery.gte('created_at', filters.startDate.toISOString());
+      }
+      if (filters.endDate) {
+          countQuery = countQuery.lte('created_at', filters.endDate.toISOString());
+      }
+      
+      const { count, error: countError } = await countQuery;
+      if (countError) {
+          console.error('❌ Erro ao contar logs:', countError);
+      }
+      console.log('📋 Total de logs encontrados:', count);
+      setAuditLogsTotal(count || 0);
+      
+      // Buscar registros paginados
+      const from = (auditLogsPage - 1) * auditLogsPerPage;
+      const to = from + auditLogsPerPage - 1;
+      
       let query = supabase
         .from('logs_validacao')
         .select(`
@@ -609,7 +646,7 @@ export function ProfilePage() {
             devolucao:devolucoes(numero, nome_cliente)
         `)
         .order('created_at', { ascending: false })
-        .limit(50);
+        .range(from, to);
       
       // Filtros de data também aplicam aos logs
       if (filters.startDate) {
@@ -619,8 +656,17 @@ export function ProfilePage() {
           query = query.lte('created_at', filters.endDate.toISOString());
       }
 
-      const { data } = await query;
-      if (data) setAuditLogs(data);
+      const { data, error } = await query;
+      if (error) {
+          console.error('❌ Erro ao buscar logs:', error);
+      } else {
+          console.log('✅ Logs carregados:', data?.length || 0);
+      }
+      if (data) {
+          setAuditLogs(data);
+      } else {
+          setAuditLogs([]);
+      }
   };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
@@ -668,15 +714,14 @@ export function ProfilePage() {
   return (
     <div className="space-y-6">
       <PageHeader 
-        title={user.role === 'ADMIN' ? "Painel Administrativo" : "Meu Perfil"} 
-        description={user.role === 'ADMIN' 
+        title={(user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA') ? "Painel Administrativo" : "Meu Perfil"} 
+        description={(user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA')
           ? "Visão geral de todos os dados do sistema, métricas gerais e KPIs de usuários."
           : "Visualize suas métricas pessoais, histórico de validações e gerencie suas configurações de segurança."
         }
       />
       
-      {/* Filtros Globais agora presentes no Perfil */}
-      <FilterBar />
+      {/* Filtros removidos conforme solicitado */}
 
       <div className="grid gap-6 md:grid-cols-7">
         {/* User Info Card */}
@@ -729,10 +774,14 @@ export function ProfilePage() {
                 <CardDescription>Suas métricas e configurações pessoais</CardDescription>
             </CardHeader>
             <CardContent>
-                <Tabs defaultValue="overview">
+                <Tabs defaultValue={user.role === 'GESTOR' ? 'security' : 'overview'}>
                     <TabsList className="w-full justify-start">
-                        <TabsTrigger value="overview">Visão Geral</TabsTrigger>
-                        {(user.role === 'ADMIN' || user.role === 'GESTOR') && (
+                        {/* GESTOR não vê Visão Geral nem Histórico */}
+                        {user.role !== 'GESTOR' && (
+                            <TabsTrigger value="overview">Visão Geral</TabsTrigger>
+                        )}
+                        {/* ADMIN, COMERCIAL e LOGISTICA veem Histórico */}
+                        {(user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA') && (
                             <TabsTrigger value="audit">Histórico de Validações</TabsTrigger>
                         )}
                         <TabsTrigger value="security">Segurança</TabsTrigger>
@@ -742,7 +791,9 @@ export function ProfilePage() {
                         <div className="grid gap-4 md:grid-cols-3">
                             <Card className="bg-primary/5 border-primary/20">
                                 <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                                    <CardTitle className="text-sm font-medium text-muted-foreground">Minhas Devoluções</CardTitle>
+                                    <CardTitle className="text-sm font-medium text-muted-foreground">
+                                        {(user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA') ? 'Total de Devoluções' : 'Minhas Devoluções'}
+                                    </CardTitle>
                                     <Package className="h-4 w-4 text-primary" />
                                 </CardHeader>
                                 <CardContent>
@@ -772,12 +823,18 @@ export function ProfilePage() {
                             </Card>
                         </div>
                         
-                        {/* Gráfico de linha: minhas devoluções no tempo */}
+                        {/* Gráfico de linha: devoluções no tempo */}
                         {timelineData.length > 0 && (
                             <Card>
                                 <CardHeader>
-                                    <CardTitle>Minhas Devoluções no Tempo</CardTitle>
-                                    <CardDescription>Evolução mensal das suas devoluções</CardDescription>
+                                    <CardTitle>
+                                        {(user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA') ? 'Devoluções no Tempo' : 'Minhas Devoluções no Tempo'}
+                                    </CardTitle>
+                                    <CardDescription>
+                                        {(user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA') 
+                                            ? 'Evolução mensal de todas as devoluções' 
+                                            : 'Evolução mensal das suas devoluções'}
+                                    </CardDescription>
                                 </CardHeader>
                                 <CardContent>
                                     <ResponsiveContainer width="100%" height={300}>
@@ -923,8 +980,8 @@ export function ProfilePage() {
                             </Card>
                         )}
                         
-                        {/* KPIs de Usuários - Apenas para ADMIN */}
-                        {user.role === 'ADMIN' && userKPIs && (
+                        {/* KPIs de Usuários - Para ADMIN, COMERCIAL e LOGISTICA */}
+                        {(user.role === 'ADMIN' || user.role === 'COMERCIAL' || user.role === 'LOGISTICA') && userKPIs && (
                             <Card>
                                 <CardHeader>
                                     <CardTitle>KPIs de Usuários</CardTitle>
@@ -1011,40 +1068,92 @@ export function ProfilePage() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {auditLogs.map((log) => (
-                                        <TableRow key={log.id}>
-                                            <TableCell className="text-xs">
-                                                {format(new Date(log.created_at), 'dd/MM/yyyy HH:mm')}
-                                            </TableCell>
-                                            <TableCell className="font-medium">{log.user?.name || 'Sistema'}</TableCell>
-                                            <TableCell>{log.devolucao?.numero || log.devolucao_id?.slice(0, 8) || '-'}</TableCell>
-                                            <TableCell>
-                                                <Badge variant={
-                                                    log.acao === 'SELECIONAR_MOTIVO' || log.status_novo === 'VALIDADA' ? 'default' : 
-                                                    log.status_novo === 'TRATATIVA DE ANULAÇÃO' ? 'destructive' : 
-                                                    'secondary'
-                                                }>
-                                                    {log.acao === 'SELECIONAR_MOTIVO' ? 'Validou' : 
-                                                     log.acao === 'ALTERAR_RESULTADO' ? 'Alterou Resultado' :
-                                                     log.acao || 'Ação'}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell className="text-muted-foreground text-xs">
-                                                {log.status_anterior} → {log.status_novo}
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                    {auditLogs.length === 0 && (
+                                    {auditLogs && auditLogs.length > 0 ? (
+                                        auditLogs.map((log) => (
+                                            <TableRow key={log.id}>
+                                                <TableCell className="text-xs">
+                                                    {format(new Date(log.created_at), 'dd/MM/yyyy HH:mm')}
+                                                </TableCell>
+                                                <TableCell className="font-medium">{log.user?.name || 'Sistema'}</TableCell>
+                                                <TableCell>{log.devolucao?.numero || log.devolucao_id?.slice(0, 8) || '-'}</TableCell>
+                                                <TableCell>
+                                                    <Badge variant={
+                                                        log.acao === 'SELECIONAR_MOTIVO' || log.status_novo === 'VALIDADA' ? 'default' : 
+                                                        log.status_novo === 'TRATATIVA DE ANULAÇÃO' ? 'destructive' : 
+                                                        'secondary'
+                                                    }>
+                                                        {log.acao === 'SELECIONAR_MOTIVO' ? 'Validou' : 
+                                                         log.acao === 'ALTERAR_RESULTADO' ? 'Alterou Resultado' :
+                                                         log.acao || 'Ação'}
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell className="text-muted-foreground text-xs">
+                                                    {log.status_anterior} → {log.status_novo}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
                                         <TableRow>
                                             <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
                                                 <History className="h-10 w-10 mx-auto mb-3 opacity-20" />
                                                 <p>Nenhum registro de validação encontrado.</p>
+                                                {user?.role === 'COMERCIAL' || user?.role === 'LOGISTICA' ? (
+                                                    <p className="text-xs mt-2">Carregando dados...</p>
+                                                ) : null}
                                             </TableCell>
                                         </TableRow>
                                     )}
                                 </TableBody>
                             </Table>
                         </div>
+                        
+                        {/* Paginação */}
+                        {auditLogsTotal > 0 && (
+                            <div className="flex items-center justify-between px-2 py-4 border-t">
+                                <div className="text-sm text-muted-foreground">
+                                    {auditLogsTotal > auditLogsPerPage ? (
+                                        <>Mostrando {((auditLogsPage - 1) * auditLogsPerPage) + 1} a {Math.min(auditLogsPage * auditLogsPerPage, auditLogsTotal)} de {auditLogsTotal} registros</>
+                                    ) : (
+                                        <>Total de {auditLogsTotal} registro(s)</>
+                                    )}
+                                </div>
+                                {auditLogsTotal > auditLogsPerPage && (
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                setAuditLogsPage(prev => {
+                                                    const newPage = Math.max(1, prev - 1);
+                                                    return newPage;
+                                                });
+                                            }}
+                                            disabled={auditLogsPage === 1}
+                                        >
+                                            <ChevronLeft className="h-4 w-4" />
+                                            Anterior
+                                        </Button>
+                                        <div className="text-sm text-muted-foreground">
+                                            Página {auditLogsPage} de {Math.ceil(auditLogsTotal / auditLogsPerPage)}
+                                        </div>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => {
+                                                setAuditLogsPage(prev => {
+                                                    const maxPage = Math.ceil(auditLogsTotal / auditLogsPerPage);
+                                                    return Math.min(maxPage, prev + 1);
+                                                });
+                                            }}
+                                            disabled={auditLogsPage >= Math.ceil(auditLogsTotal / auditLogsPerPage)}
+                                        >
+                                            Próxima
+                                            <ChevronRight className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </TabsContent>
 
                     <TabsContent value="security" className="mt-6">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -7,6 +7,7 @@ import { SyncPage } from "./pages/SyncPage";
 import { ValidationPage } from "./pages/ValidationPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { EmptyPage } from "./pages/EmptyPage";
 import { MainLayout } from "./components/layout/MainLayout";
 import { Toaster } from "./components/ui/sonner";
 import { useAuthStore } from "./lib/store";
@@ -43,11 +44,12 @@ VITE_SUPABASE_ANON_KEY=sua_chave_aqui`}
 }
 
 // Protected Route Wrapper
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute({ children, allowNovo = false }: { children: React.ReactNode; allowNovo?: boolean }) {
   const { user, isLoading } = useAuthStore();
+  const location = useLocation();
   
   // Debug
-  console.log('ProtectedRoute - isLoading:', isLoading, 'user:', user?.email);
+  console.log('ProtectedRoute - isLoading:', isLoading, 'user:', user?.email, 'location:', location.pathname);
   
   if (isLoading) {
     return (
@@ -63,7 +65,40 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />;
   }
   
+  // Se allowNovo é true (para rota /empty), permitir usuários NOVO
+  if (allowNovo) {
+    return <>{children}</>;
+  }
+  
+  // Usuário NOVO deve ir para página vazia (exceto se já estiver lá)
+  if ((!user.role || user.role === 'NOVO') && location.pathname !== '/empty') {
+    console.log('ProtectedRoute - Redirecionando usuário NOVO para /empty');
+    return <Navigate to="/empty" replace />;
+  }
+  
   return <>{children}</>;
+}
+
+// Componente para redirecionar baseado no role
+function IndexRedirect() {
+  const { user, isLoading } = useAuthStore();
+  
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="ml-4 text-sm text-muted-foreground">Carregando...</p>
+      </div>
+    );
+  }
+  
+  // Usuário NOVO vai para página vazia
+  if (!user?.role || user.role === 'NOVO') {
+    return <Navigate to="/empty" replace />;
+  }
+  
+  // Outros usuários vão para dashboard
+  return <Navigate to="/dashboard" replace />;
 }
 
 // Role Protected Route - Verifica se o usuário tem permissão para acessar a rota
@@ -89,10 +124,10 @@ function RoleProtectedRoute({
     return <Navigate to="/login" replace />;
   }
   
-  // Usuário sem role ou tipo NOVO só pode acessar perfil
+  // Usuário sem role ou tipo NOVO só pode acessar página vazia
   if (!user.role || user.role === 'NOVO') {
     console.warn(`🚫 Acesso negado: usuário ${user.email} (${user.role || 'sem role'}) tentou acessar rota protegida`);
-    return <Navigate to="/profile" replace />;
+    return <Navigate to="/empty" replace />;
   }
   
   const userRole = typeof user.role === 'string' ? user.role.toUpperCase() : user.role;
@@ -125,13 +160,13 @@ function App() {
       return;
     }
 
-    // Timeout de segurança
+    // Timeout de segurança - aumentar para dar mais tempo para queries
     const timeoutId = setTimeout(() => {
       if (isActive) {
-        console.warn('⚠️ Timeout - forçando setIsLoading(false)');
+        console.warn('⚠️ Timeout de segurança - forçando setIsLoading(false)');
         setIsLoading(false);
       }
-    }, 8000);
+    }, 15000);
 
     // Função para carregar perfil com timeout e retry
     const loadProfile = async (userId: string, email: string): Promise<{
@@ -144,33 +179,40 @@ function App() {
     }> => {
       console.log('📋 Carregando perfil para:', email, 'userId:', userId);
       
-      // Tentar buscar do banco com timeout de 2 segundos
-      let profileFromDb: any = null;
-      let queryCompleted = false;
+      // Verificar se já temos um perfil em cache para este usuário
+      const storeState = useAuthStore.getState();
+      const cachedUser = storeState.user;
+      if (cachedUser && cachedUser.id === userId && cachedUser.role && cachedUser.role !== 'NOVO') {
+        console.log('✅ Usando perfil em cache:', cachedUser.role);
+        return cachedUser;
+      }
       
+      // Tentar buscar do banco - com timeout de 8 segundos
       try {
         const queryStartTime = Date.now();
+        
+        // Criar uma promise com timeout
         const queryPromise = supabase
           .from('profiles')
           .select('id, email, name, role, vendedor')
           .eq('id', userId)
           .maybeSingle();
         
-        // Timeout de 2 segundos - se passar disso, usar fallback imediatamente
         const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => {
-            if (!queryCompleted) {
-              reject(new Error('Query timeout após 2 segundos'));
-            }
-          }, 2000);
+          setTimeout(() => reject(new Error('Query timeout após 8 segundos')), 8000);
         });
         
-        const result = await Promise.race([queryPromise, timeoutPromise]) as any;
-        queryCompleted = true;
+        let result: any;
+        try {
+          result = await Promise.race([queryPromise, timeoutPromise]);
+        } catch (timeoutErr) {
+          console.warn('⏱️ Query timeout, continuando com fallback...');
+          throw timeoutErr;
+        }
         
         const { data, error } = result;
         const queryTime = Date.now() - queryStartTime;
-        console.log(`📊 Query executada em ${queryTime}ms`);
+        console.log(`📊 Query executada em ${queryTime}ms`, { hasData: !!data, error: error?.message });
         
         if (data && !error) {
           // Garantir que o role seja uma string válida e em maiúsculas
@@ -191,7 +233,7 @@ function App() {
             role = 'NOVO';
           }
           
-          profileFromDb = {
+          const profileFromDb = {
             id: data.id,
             email,
             name: data.name || email.split('@')[0],
@@ -200,13 +242,21 @@ function App() {
           };
           
           console.log('✅ Perfil carregado do banco:', profileFromDb);
+          
+          // Salvar no localStorage para cache persistente
+          try {
+            const profileWithCache = { ...profileFromDb, _cacheTime: Date.now() };
+            localStorage.setItem(`profile_${userId}`, JSON.stringify(profileWithCache));
+          } catch (storageErr) {
+            console.warn('⚠️ Erro ao salvar perfil no localStorage:', storageErr);
+          }
+          
           return profileFromDb;
         } else {
           console.warn('⚠️ Sem dados do perfil no banco. Erro:', error);
         }
       } catch (err: any) {
-        queryCompleted = true;
-        console.warn('⏱️ Timeout ou erro na query do banco, tentando fallback...', err?.message || err);
+        console.warn('⏱️ Erro na query do banco, tentando fallback...', err?.message || err);
         // Continuar para o fallback
       }
       
@@ -284,30 +334,27 @@ function App() {
           // Se já temos o usuário carregado e não é USER_UPDATED, manter o atual
           if (currentUser && currentUser.id === session.user.id && event !== 'USER_UPDATED') {
             console.log('✅ Usuário já carregado, mantendo perfil atual:', currentUser.role);
+            if (isActive) {
+              setIsLoading(false);
+            }
             return;
           }
           
-          // Usar Promise.race para garantir que sempre retorne em até 3 segundos
+          // Carregar perfil com timeout de segurança
           const profilePromise = loadProfile(session.user.id, session.user.email!);
           const timeoutPromise = new Promise((resolve) => {
             setTimeout(() => {
-              // Se timeout, manter perfil atual se existir, senão usar COMERCIAL
-              const storeStateOnTimeout = useAuthStore.getState();
-              const currentUserOnTimeout = storeStateOnTimeout.user;
-              
-              if (currentUserOnTimeout && currentUserOnTimeout.id === session.user.id) {
-                console.log('⏱️ Timeout - mantendo perfil atual:', currentUserOnTimeout.role);
-                resolve(currentUserOnTimeout);
-              } else {
-                resolve({
-                  id: session.user.id,
-                  email: session.user.email!,
-                  name: session.user.email!.split('@')[0],
-                  role: 'NOVO' as const,
-                  vendedor: null
-                });
-              }
-            }, 3000);
+              // Se timeout, usar perfil mínimo para permitir login
+              const fallbackProfile = {
+                id: session.user.id,
+                email: session.user.email!,
+                name: session.user.email!.split('@')[0],
+                role: 'NOVO' as const,
+                vendedor: null
+              };
+              console.log('⏱️ Timeout no loadProfile - usando perfil mínimo:', fallbackProfile);
+              resolve(fallbackProfile);
+            }, 10000); // 10 segundos de timeout
           });
           
           const profile = await Promise.race([profilePromise, timeoutPromise]) as any;
@@ -330,78 +377,7 @@ function App() {
         }
       } catch (err) {
         console.error('❌ Erro no listener de auth:', err);
-        // Em caso de erro, manter perfil atual se existir
-        const storeStateOnError = useAuthStore.getState();
-        const currentUserOnError = storeStateOnError.user;
-        
-        if (isActive && session?.user && currentUserOnError && currentUserOnError.id === session.user.id) {
-          console.log('⚠️ Erro ao recarregar - mantendo perfil atual:', currentUserOnError.role);
-          // Não atualizar, manter o atual
-        } else if (isActive && session?.user) {
-          const fallbackProfile = {
-            id: session.user.id,
-            email: session.user.email!,
-            name: session.user.email!.split('@')[0],
-            role: 'NOVO' as const,
-            vendedor: null
-          };
-          console.log('⚠️ Usando perfil mínimo devido a erro:', fallbackProfile);
-          setUser(fallbackProfile);
-        } else {
-          setUser(null);
-        }
-      } finally {
-        // Sempre definir isLoading como false após tentar carregar
-        if (isActive) {
-          setIsLoading(false);
-          clearTimeout(timeoutId);
-        }
-      }
-    });
-
-    // Verificar sessão inicial
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!isActive) return;
-      
-      try {
-        if (session?.user) {
-          console.log('✅ Sessão encontrada:', session.user.email);
-          
-          // Usar Promise.race para garantir que sempre retorne em até 3 segundos
-          const profilePromise = loadProfile(session.user.id, session.user.email!);
-          const timeoutPromise = new Promise((resolve) => {
-            setTimeout(() => {
-              // Criar perfil mínimo se timeout
-              resolve({
-                id: session.user.id,
-                email: session.user.email!,
-                name: session.user.email!.split('@')[0],
-                role: 'NOVO' as const,
-                vendedor: null
-              });
-            }, 3000);
-          });
-          
-          const profile = await Promise.race([profilePromise, timeoutPromise]) as any;
-          
-          if (isActive && profile) {
-            console.log('✅ Setando usuário inicial:', {
-              email: profile.email,
-              role: profile.role,
-              name: profile.name,
-              vendedor: profile.vendedor
-            });
-            setUser(profile);
-          }
-        } else {
-          console.log('ℹ️ Sem sessão inicial');
-          if (isActive) {
-            setUser(null);
-          }
-        }
-      } catch (err) {
-        console.error('❌ Erro ao carregar sessão inicial:', err);
-        // Em caso de erro, criar perfil mínimo
+        // Em caso de erro, garantir que o usuário seja setado para permitir login
         if (isActive && session?.user) {
           const fallbackProfile = {
             id: session.user.id,
@@ -418,6 +394,154 @@ function App() {
       } finally {
         // Sempre definir isLoading como false após tentar carregar
         if (isActive) {
+          setIsLoading(false);
+        }
+      }
+    });
+
+    // Verificar sessão inicial
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!isActive) return;
+      
+      try {
+        if (session?.user) {
+          console.log('✅ Sessão encontrada:', session.user.email);
+          
+          // PRIMEIRO: Verificar se já temos o usuário no store (do localStorage via authStore)
+          const storeState = useAuthStore.getState();
+          const cachedUser = storeState.user;
+          if (cachedUser && cachedUser.id === session.user.id && cachedUser.role && cachedUser.role !== 'NOVO') {
+            console.log('✅ Usando perfil do store (cache):', cachedUser.role);
+            setIsLoading(false);
+            clearTimeout(timeoutId);
+            
+            // Carregar do banco em background para atualizar o cache
+            loadProfile(session.user.id, session.user.email!).then((freshProfile) => {
+              if (freshProfile && isActive) {
+                setUser(freshProfile);
+              }
+            }).catch((err) => {
+              console.warn('⚠️ Erro ao atualizar perfil em background:', err);
+            });
+            return;
+          }
+          
+          // SEGUNDO: Tentar carregar do localStorage (cache persistente por perfil)
+          try {
+            const cachedProfileStr = localStorage.getItem(`profile_${session.user.id}`);
+            if (cachedProfileStr) {
+              const cachedProfileData = JSON.parse(cachedProfileStr);
+              // Verificar se o cache não expirou (24 horas)
+              const cacheTime = cachedProfileData._cacheTime || 0;
+              const now = Date.now();
+              const cacheAge = now - cacheTime;
+              const cacheExpiry = 24 * 60 * 60 * 1000; // 24 horas
+              
+              if (cacheAge < cacheExpiry && cachedProfileData.role && cachedProfileData.role !== 'NOVO') {
+                // Remover _cacheTime antes de usar
+                const { _cacheTime, ...cachedProfile } = cachedProfileData;
+                console.log('✅ Usando perfil do localStorage:', cachedProfile.role);
+                setUser(cachedProfile);
+                setIsLoading(false);
+                clearTimeout(timeoutId);
+                
+                // Carregar do banco em background para atualizar o cache
+                loadProfile(session.user.id, session.user.email!).then((freshProfile) => {
+                  if (freshProfile && isActive) {
+                    setUser(freshProfile);
+                  }
+                }).catch((err) => {
+                  console.warn('⚠️ Erro ao atualizar perfil em background:', err);
+                });
+                return;
+              } else {
+                console.log('⚠️ Cache expirado ou inválido, buscando do banco...');
+                localStorage.removeItem(`profile_${session.user.id}`);
+              }
+            }
+          } catch (cacheErr) {
+            console.warn('⚠️ Erro ao ler cache do localStorage:', cacheErr);
+          }
+          
+          // Carregar perfil do banco - SEM timeout artificial na verificação inicial
+          // Deixar a query completar naturalmente, pois não é um login novo
+          const profile = await loadProfile(session.user.id, session.user.email!);
+          
+          if (isActive && profile) {
+            console.log('✅ Setando usuário inicial:', {
+              email: profile.email,
+              role: profile.role,
+              name: profile.name,
+              vendedor: profile.vendedor
+            });
+            
+            // Salvar no localStorage para cache persistente
+            try {
+              const profileWithCache = { ...profile, _cacheTime: Date.now() };
+              localStorage.setItem(`profile_${session.user.id}`, JSON.stringify(profileWithCache));
+            } catch (storageErr) {
+              console.warn('⚠️ Erro ao salvar no localStorage:', storageErr);
+            }
+            
+            setUser(profile);
+            setIsLoading(false);
+            clearTimeout(timeoutId);
+          }
+        } else {
+          console.log('ℹ️ Sem sessão inicial');
+          if (isActive) {
+            setUser(null);
+            setIsLoading(false);
+            clearTimeout(timeoutId);
+          }
+        }
+      } catch (err) {
+        console.error('❌ Erro ao carregar sessão inicial:', err);
+        // Em caso de erro, tentar usar cache do localStorage como último recurso
+        if (isActive && session?.user) {
+          // Primeiro tentar o store
+          const storeStateOnError = useAuthStore.getState();
+          const cachedUserOnError = storeStateOnError.user;
+          if (cachedUserOnError && cachedUserOnError.id === session.user.id && cachedUserOnError.role && cachedUserOnError.role !== 'NOVO') {
+            console.log('⚠️ Usando perfil do store devido a erro:', cachedUserOnError.role);
+            setIsLoading(false);
+            clearTimeout(timeoutId);
+            return;
+          }
+          
+          // Segundo tentar localStorage
+          try {
+            const cachedProfileStr = localStorage.getItem(`profile_${session.user.id}`);
+            if (cachedProfileStr) {
+              const cachedProfileData = JSON.parse(cachedProfileStr);
+              const { _cacheTime, ...cachedProfile } = cachedProfileData;
+              if (cachedProfile.role && cachedProfile.role !== 'NOVO') {
+                console.log('⚠️ Usando perfil do cache devido a erro:', cachedProfile.role);
+                setUser(cachedProfile);
+                setIsLoading(false);
+                clearTimeout(timeoutId);
+                return;
+              }
+            }
+          } catch (cacheErr) {
+            console.warn('⚠️ Erro ao ler cache em fallback:', cacheErr);
+          }
+          
+          // Se não há cache válido, usar perfil mínimo (mas só se realmente necessário)
+          // Não forçar NOVO se já temos um cache válido
+          const fallbackProfile = {
+            id: session.user.id,
+            email: session.user.email!,
+            name: session.user.email!.split('@')[0],
+            role: 'NOVO' as const,
+            vendedor: null
+          };
+          console.log('⚠️ Usando perfil mínimo devido a erro (sem cache válido):', fallbackProfile);
+          setUser(fallbackProfile);
+          setIsLoading(false);
+          clearTimeout(timeoutId);
+        } else {
+          setUser(null);
           setIsLoading(false);
           clearTimeout(timeoutId);
         }
@@ -447,6 +571,15 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        {/* Rota para usuários NOVO - fora do MainLayout */}
+        <Route 
+          path="/empty" 
+          element={
+            <ProtectedRoute allowNovo={true}>
+              <EmptyPage />
+            </ProtectedRoute>
+          } 
+        />
         <Route
           path="/"
           element={
@@ -455,12 +588,12 @@ function App() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<DashboardPage />} />
+          <Route index element={<IndexRedirect />} />
+          <Route path="dashboard" element={<RoleProtectedRoute allowedRoles={['GESTOR', 'COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR']}><DashboardPage /></RoleProtectedRoute>} />
           <Route path="validation" element={<RoleProtectedRoute allowedRoles={['COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR']}><ValidationPage /></RoleProtectedRoute>} />
-          <Route path="reports" element={<ReportsPage />} />
+          <Route path="reports" element={<RoleProtectedRoute allowedRoles={['GESTOR', 'COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR']}><ReportsPage /></RoleProtectedRoute>} />
           <Route path="sync" element={<RoleProtectedRoute allowedRoles={['LOGISTICA', 'ADMIN']}><SyncPage /></RoleProtectedRoute>} />
-          <Route path="settings" element={<RoleProtectedRoute allowedRoles={['ADMIN']}><SettingsPage /></RoleProtectedRoute>} />
+          <Route path="settings" element={<RoleProtectedRoute allowedRoles={['ADMIN', 'LOGISTICA']}><SettingsPage /></RoleProtectedRoute>} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
       </Routes>

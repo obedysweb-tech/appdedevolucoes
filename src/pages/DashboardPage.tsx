@@ -99,6 +99,7 @@ export function DashboardPage() {
       slaBreach: 0,
       totalProducts: 0
   });
+  const [velocimetroValue, setVelocimetroValue] = useState(0);
   const [chartData, setChartData] = useState<any[]>([]);
   const [topCustomers, setTopCustomers] = useState<any[]>([]);
   const [topVendedores, setTopVendedores] = useState<any[]>([]);
@@ -205,6 +206,7 @@ export function DashboardPage() {
             slaBreach: 0,
             totalProducts: 0
         });
+        setVelocimetroValue(0);
         setChartData([]);
         setTopCustomers([]);
         setTopVendedores([]);
@@ -238,6 +240,11 @@ export function DashboardPage() {
         // Calcular notas fora do SLA (PRAZO = 'EM ATRASO')
         const slaBreach = devolucoes.filter(d => d.prazo === 'EM ATRASO').length;
         
+        // Calcular valor para velocímetro: PENDENTE VALIDAÇÃO + TRATATIVA DE ANULAÇÃO
+        const valorVelocimetro = devolucoes
+            .filter(d => d.resultado === 'PENDENTE VALIDAÇÃO' || d.resultado === 'TRATATIVA DE ANULAÇÃO')
+            .reduce((acc, curr) => acc + (Number(curr.valor_total_nota) || 0), 0);
+        
         setStats({
             totalValue,
             totalReturns,
@@ -245,6 +252,7 @@ export function DashboardPage() {
             slaBreach,
             totalProducts
         });
+        setVelocimetroValue(valorVelocimetro);
 
         // 2. Gráfico de Evolução (Agrupar por Dia) - Incluir valor e quantidade de notas
         const groupedByDay = devolucoes.reduce((acc: any, curr) => {
@@ -430,8 +438,11 @@ export function DashboardPage() {
         // 4. Gráfico de Motivos (movido para antes dos insights)
         const reasonMap = devolucoes.reduce((acc: any, curr) => {
             const motivo = curr.motivos_devolucao;
-            const reason = (typeof motivo === 'object' && motivo?.nome) ? motivo.nome : (typeof motivo === 'string' ? motivo : 'Não informado');
-            acc[reason] = (acc[reason] || 0) + 1;
+            const reason = (typeof motivo === 'object' && motivo?.nome) ? motivo.nome : (typeof motivo === 'string' ? motivo : null);
+            // Ignorar motivos nulos ou "Não informado"
+            if (reason && reason !== 'Não informado' && reason !== 'não informado' && reason !== 'NÃO INFORMADO') {
+                acc[reason] = (acc[reason] || 0) + 1;
+            }
             return acc;
         }, {});
 
@@ -613,7 +624,12 @@ export function DashboardPage() {
         const motivosPorRedeMap: Record<string, Record<string, { count: number, detalhes: Array<{ cliente: string, nota: string }> }>> = {};
         devolucoes.forEach((curr) => {
             const rede = curr.rede || 'Sem rede';
-            const motivoNome = curr.motivos_devolucao?.nome || 'Não informado';
+            const motivoNome = curr.motivos_devolucao?.nome;
+            
+            // Ignorar motivos nulos ou "Não informado"
+            if (!motivoNome || motivoNome === 'Não informado' || motivoNome === 'não informado' || motivoNome === 'NÃO INFORMADO') {
+                return;
+            }
             
             if (!motivosPorRedeMap[rede]) {
                 motivosPorRedeMap[rede] = {};
@@ -740,26 +756,81 @@ export function DashboardPage() {
         console.log('💡 Insights:', insightsList);
         setInsights(insightsList);
         
-        // Alertas automáticos
+        // Alertas automáticos - Recriados conforme solicitado
         const alertsList: any[] = [];
         
-        // Alerta: produtos acima da média
-        if (totalProducts > 0 && totalReturns > 0) {
-            const avgProductsPerReturn = totalProducts / totalReturns;
-            devolucoes.forEach(devol => {
-                const itens = devol.itens || [];
-                const totalItens = itens.reduce((sum: number, item: any) => sum + (Number(item.quantidade) || 0), 0);
-                if (totalItens > avgProductsPerReturn * 1.5) {
-                    alertsList.push({
-                        type: 'warning',
-                        message: `Nota ${devol.numero} tem ${totalItens} produtos (acima da média de ${avgProductsPerReturn.toFixed(1)})`,
-                        cliente: devol.nome_cliente
-                    });
-                }
+        // 1. Notas em atraso (prazo = 'EM ATRASO')
+        const notasAtraso = devolucoes.filter(d => d.prazo === 'EM ATRASO');
+        if (notasAtraso.length > 0) {
+            alertsList.push({
+                type: 'warning',
+                message: `${notasAtraso.length} nota(s) em atraso`,
+                total: notasAtraso.length
             });
         }
         
-        setAlerts(alertsList.slice(0, 5)); // Limitar a 5 alertas
+        // 2. Quantidade de notas quando acima de 50
+        if (totalReturns > 50) {
+            alertsList.push({
+                type: 'info',
+                message: `Total de ${totalReturns} notas no período (acima de 50)`,
+                total: totalReturns
+            });
+        }
+        
+        // 3. Notas pendentes quando acima de 20
+        const notasPendentes = devolucoes.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO');
+        if (notasPendentes.length > 20) {
+            alertsList.push({
+                type: 'warning',
+                message: `${notasPendentes.length} nota(s) pendentes de validação (acima de 20)`,
+                total: notasPendentes.length
+            });
+        }
+        
+        // 4. Notas com valores acima de 1000
+        const notasValorAlto = devolucoes.filter(d => Number(d.valor_total_nota) > 1000);
+        if (notasValorAlto.length > 0) {
+            alertsList.push({
+                type: 'warning',
+                message: `${notasValorAlto.length} nota(s) com valor acima de R$ 1.000,00`,
+                total: notasValorAlto.length
+            });
+        }
+        
+        // 5. Clientes com mais de 5 notas pendente validação
+        const clientesPendentes: Record<string, any[]> = {};
+        notasPendentes.forEach(devol => {
+            const cliente = devol.nome_cliente || 'Desconhecido';
+            if (!clientesPendentes[cliente]) {
+                clientesPendentes[cliente] = [];
+            }
+            clientesPendentes[cliente].push(devol);
+        });
+        
+        Object.entries(clientesPendentes).forEach(([cliente, notas]) => {
+            if (notas.length > 5) {
+                alertsList.push({
+                    type: 'error',
+                    message: `Cliente "${cliente}" tem ${notas.length} notas pendentes de validação`,
+                    cliente: cliente,
+                    total: notas.length
+                });
+            }
+        });
+        
+        // 6. Notas em cancelamentos (TRATATIVA DE ANULAÇÃO)
+        const notasCancelamento = devolucoes.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO');
+        if (notasCancelamento.length > 0) {
+            alertsList.push({
+                type: 'error',
+                message: `${notasCancelamento.length} nota(s) em tratativa de anulação`,
+                detalhes: notasCancelamento.map(n => `${n.numero} - ${n.nome_cliente}`).slice(0, 3),
+                total: notasCancelamento.length
+            });
+        }
+        
+        setAlerts(alertsList); // Mostrar todos os alertas
       }
     } catch (error: any) {
       console.error('❌ Erro ao processar dados do Dashboard:', error);
@@ -767,6 +838,100 @@ export function DashboardPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Componente Velocímetro
+  const Velocimetro = ({ value }: { value: number }) => {
+    const maxValue = 30000; // Valor máximo para o velocímetro (30 mil)
+    const percentage = Math.min((value / maxValue) * 100, 100);
+    
+    // Determinar cor baseada no valor
+    let color = '#22c55e'; // Verde
+    if (value >= 20000) {
+      color = '#ef4444'; // Vermelho
+    } else if (value >= 10000) {
+      color = '#eab308'; // Amarelo
+    }
+    
+    // Calcular ângulo do ponteiro (180 graus = meia circunferência)
+    const angle = (percentage / 100) * 180 - 90; // -90 para começar à esquerda
+    
+    // Aumentar tamanho do velocímetro
+    const svgWidth = 400;
+    const svgHeight = 240;
+    const svgRadius = 160;
+    const svgCenterX = svgWidth / 2;
+    const svgCenterY = svgHeight / 2;
+    const svgPointerLength = 120;
+    
+    // Recalcular posição do ponteiro com novo tamanho
+    const svgPointerX = svgCenterX + svgPointerLength * Math.cos((angle * Math.PI) / 180);
+    const svgPointerY = svgCenterY + svgPointerLength * Math.sin((angle * Math.PI) / 180);
+    
+    return (
+      <div className="relative w-full flex justify-center">
+        <svg width={svgWidth} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
+          {/* Arco de fundo (cinza) */}
+          <path
+            d={`M ${svgCenterX - svgRadius} ${svgCenterY + svgRadius} A ${svgRadius} ${svgRadius} 0 0 1 ${svgCenterX + svgRadius} ${svgCenterY + svgRadius}`}
+            fill="none"
+            stroke="#e5e7eb"
+            strokeWidth="20"
+            strokeLinecap="round"
+          />
+          
+          {/* Arco verde (0-10k) */}
+          <path
+            d={`M ${svgCenterX - svgRadius} ${svgCenterY + svgRadius} A ${svgRadius} ${svgRadius} 0 0 1 ${svgCenterX} ${svgCenterY - svgRadius}`}
+            fill="none"
+            stroke="#22c55e"
+            strokeWidth="20"
+            strokeLinecap="round"
+            opacity={value < 10000 ? 1 : 0.3}
+          />
+          
+          {/* Arco amarelo (10k-20k) */}
+          <path
+            d={`M ${svgCenterX} ${svgCenterY - svgRadius} A ${svgRadius} ${svgRadius} 0 0 1 ${svgCenterX + svgRadius} ${svgCenterY + svgRadius}`}
+            fill="none"
+            stroke="#eab308"
+            strokeWidth="20"
+            strokeLinecap="round"
+            opacity={value >= 10000 && value < 20000 ? 1 : value >= 20000 ? 0.3 : 0.3}
+          />
+          
+          {/* Arco vermelho (20k+) */}
+          {value >= 20000 && (
+            <path
+              d={`M ${svgCenterX} ${svgCenterY - svgRadius} A ${svgRadius} ${svgRadius} 0 0 1 ${svgCenterX + svgRadius} ${svgCenterY + svgRadius}`}
+              fill="none"
+              stroke="#ef4444"
+              strokeWidth="20"
+              strokeLinecap="round"
+            />
+          )}
+          
+          {/* Ponteiro */}
+          <line
+            x1={svgCenterX}
+            y1={svgCenterY}
+            x2={svgPointerX}
+            y2={svgPointerY}
+            stroke={color}
+            strokeWidth="5"
+            strokeLinecap="round"
+          />
+          
+          {/* Círculo central */}
+          <circle cx={svgCenterX} cy={svgCenterY} r="15" fill={color} />
+          
+          {/* Marcadores */}
+          <text x={svgCenterX - svgRadius} y={svgCenterY + svgRadius + 20} fontSize="16" fill="#6b7280" fontWeight="bold">0</text>
+          <text x={svgCenterX} y={svgCenterY - svgRadius - 10} fontSize="16" fill="#6b7280" fontWeight="bold" textAnchor="middle">10k</text>
+          <text x={svgCenterX + svgRadius} y={svgCenterY + svgRadius + 20} fontSize="16" fill="#6b7280" fontWeight="bold" textAnchor="end">20k+</text>
+        </svg>
+      </div>
+    );
   };
 
   // Componente CustomTooltip para os gráficos
@@ -842,26 +1007,75 @@ export function DashboardPage() {
         </Button>
       </div>
 
-      {/* Alertas */}
-      {alerts.length > 0 && (
-        <Card className="border-orange-500 bg-orange-50 dark:bg-orange-950/20">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-orange-700 dark:text-orange-400">
-              <AlertTriangle className="h-5 w-5" />
-              Alertas ({alerts.length})
-            </CardTitle>
+      {/* Alertas e Velocímetro */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Alertas */}
+        {alerts.length > 0 && (
+          <Card className="border-primary/20 bg-primary/5 dark:bg-primary/10">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold text-primary">
+                <AlertTriangle className="h-4 w-4" />
+                Alertas ({alerts.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                {alerts.map((alert, idx) => (
+                  <div key={idx} className={`p-2 rounded-md border text-xs ${
+                    alert.type === 'error' ? 'bg-red-50/50 dark:bg-red-950/10 border-red-200 dark:border-red-800/50' :
+                    alert.type === 'warning' ? 'bg-amber-50/50 dark:bg-amber-950/10 border-amber-200 dark:border-amber-800/50' :
+                    'bg-primary/10 dark:bg-primary/20 border-primary/20 dark:border-primary/30'
+                  }`}>
+                    <div className={`font-medium ${
+                      alert.type === 'error' ? 'text-red-700 dark:text-red-400' :
+                      alert.type === 'warning' ? 'text-amber-700 dark:text-amber-400' :
+                      'text-primary dark:text-primary'
+                    }`}>
+                      {alert.message}
+                    </div>
+                    {/* Mostrar detalhes apenas para tratativa de anulação */}
+                    {alert.detalhes && alert.detalhes.length > 0 && alert.message.includes('tratativa de anulação') && (
+                      <div className="mt-1.5 text-xs text-muted-foreground">
+                        {alert.detalhes.map((d: string, i: number) => (
+                          <div key={i}>• {d}</div>
+                        ))}
+                        {alert.total > 3 && (
+                          <div className="mt-1 font-medium">... e mais {alert.total - 3}</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        
+        {/* Velocímetro */}
+        <Card className="border-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-center text-sm font-semibold">Status de Validação</CardTitle>
+            <CardDescription className="text-center text-xs">
+              Valor total de notas pendentes e em tratativa de anulação
+            </CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {alerts.map((alert, idx) => (
-                <div key={idx} className="text-sm text-orange-800 dark:text-orange-300">
-                  • {alert.message}
-                </div>
-              ))}
+          <CardContent className="pt-0">
+            <div className="flex justify-center items-center py-2">
+              <Velocimetro value={velocimetroValue} />
+            </div>
+            <div className="text-center mt-2">
+              <div className="text-xl font-bold">
+                R$ {velocimetroValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                {velocimetroValue < 10000 && <span className="text-green-600 font-semibold">✓ Status Normal</span>}
+                {velocimetroValue >= 10000 && velocimetroValue < 20000 && <span className="text-yellow-600 font-semibold">⚠ Atenção</span>}
+                {velocimetroValue >= 20000 && <span className="text-red-600 font-semibold">🚨 Crítico</span>}
+              </div>
             </div>
           </CardContent>
         </Card>
-      )}
+      </div>
 
       {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
