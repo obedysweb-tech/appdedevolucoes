@@ -1,6 +1,31 @@
 import { Period } from "@/types";
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear, subDays, subWeeks, subMonths } from "date-fns";
 
+/**
+ * Calcula o número de dias úteis entre duas datas (excluindo sábados e domingos)
+ * @param startDate Data inicial
+ * @param endDate Data final
+ * @returns Número de dias úteis
+ */
+export function calculateBusinessDays(startDate: Date, endDate: Date): number {
+  let count = 0;
+  const current = new Date(startDate);
+  current.setHours(0, 0, 0, 0);
+  const end = new Date(endDate);
+  end.setHours(0, 0, 0, 0);
+  
+  while (current <= end) {
+    const dayOfWeek = current.getDay();
+    // 0 = Domingo, 6 = Sábado
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      count++;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  
+  return count;
+}
+
 export function getDateRangeFromPeriod(period?: Period): { startDate?: Date; endDate?: Date } {
   if (!period) return {};
   
@@ -59,6 +84,13 @@ export function getDateRangeFromPeriod(period?: Period): { startDate?: Date; end
     case 'THIS_YEAR':
       return {
         startDate: startOfYear(now),
+        endDate: endOfYear(now)
+      };
+    case 'LAST_YEAR_AND_THIS_YEAR':
+      // Ano anterior + ano atual
+      const lastYear = now.getFullYear() - 1;
+      return {
+        startDate: new Date(lastYear, 0, 1),
         endDate: endOfYear(now)
       };
     default:

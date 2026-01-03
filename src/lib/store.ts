@@ -76,10 +76,10 @@ interface FilterState {
 
 export const useFilterStore = create<FilterState>((set) => ({
   filters: {
-    period: 'THIS_MONTH',
+    period: undefined, // Sem período pré-selecionado - mostra todas as datas
   },
   setFilters: (newFilters) => set((state) => ({ 
     filters: { ...state.filters, ...newFilters } 
   })),
-  resetFilters: () => set({ filters: { period: 'THIS_MONTH' } }),
+  resetFilters: () => set({ filters: { period: undefined } }),
 }));

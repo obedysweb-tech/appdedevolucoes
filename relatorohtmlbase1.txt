@@ -117,8 +117,9 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
   const pendentesValidacao = data.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO').length;
   const tratativasAnulacao = data.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO').length;
   const validadasCount = data.filter(d => d.resultado === 'VALIDADA').length;
+  // % PENDENTE = (PENDENTES VALIDAÇÃO) / (TRATATIVA DE ANULAÇÃO + VALIDADA)
   const totalProcessados = tratativasAnulacao + validadasCount;
-  const percentualPendente = totalProcessados > 0 ? ((totalProcessados / pendentesValidacao) * 100).toFixed(1) : '0';
+  const percentualPendente = totalProcessados > 0 ? ((pendentesValidacao / totalProcessados) * 100).toFixed(1) : '0';
   
   const totalValue = data.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
   const totalReturns = data.length;
@@ -204,7 +205,6 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Relatório de Devoluções - Grupo Doce Mel</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     * {
       margin: 0;
@@ -215,97 +215,71 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
       color-adjust: exact !important;
     }
     
-    /* A4 Portrait: 210mm x 297mm */
-    @page {
-      size: A4 portrait;
-      margin: 15mm;
-    }
-    
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-      padding: 20px;
+      background: #f5f5f5;
+      padding: 10px;
       color: #333;
       font-size: 11px;
-      line-height: 1.4;
     }
     
     .container {
-      max-width: 210mm; /* Largura A4 */
+      max-width: 1200px;
       margin: 0 auto;
       background: white;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.15);
-      border-radius: 12px;
-      overflow: hidden;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
     }
     
     .no-print {
       position: fixed;
-      top: 20px;
-      right: 20px;
+      top: 10px;
+      right: 10px;
       z-index: 1000;
       display: flex;
-      gap: 10px;
+      gap: 8px;
     }
     
     .btn {
-      background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%);
+      background: #073e29;
       color: white;
       border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 13px;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 12px;
       font-weight: bold;
       cursor: pointer;
-      box-shadow: 0 4px 15px rgba(7,62,41,0.4);
-      transition: all 0.3s ease;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
     
     .btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(7,62,41,0.5);
+      background: #0a4d33;
     }
     
     .header {
       background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%);
       color: white;
-      padding: 25px 30px;
+      padding: 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       page-break-after: avoid;
-      position: relative;
-      overflow: hidden;
-    }
-    
-    .header::before {
-      content: '';
-      position: absolute;
-      top: -50%;
-      right: -10%;
-      width: 300px;
-      height: 300px;
-      background: rgba(255,255,255,0.05);
-      border-radius: 50%;
     }
     
     .header-left {
       display: flex;
       align-items: center;
-      gap: 20px;
-      z-index: 1;
+      gap: 15px;
     }
     
     .logo {
       width: 60px;
       height: 60px;
-      background: white;
-      border-radius: 12px;
+      background: #073e29;
+      border-radius: 8px;
       overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
     
     .logo img {
@@ -315,179 +289,154 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     }
     
     .header-title h1 {
-      font-size: 24px;
-      margin-bottom: 6px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
+      font-size: 20px;
+      margin-bottom: 3px;
+      font-weight: bold;
     }
     
     .header-title p {
-      font-size: 13px;
+      font-size: 11px;
       opacity: 0.9;
-      font-weight: 500;
     }
     
     .header-right {
       text-align: right;
-      font-size: 11px;
-      z-index: 1;
+      font-size: 10px;
     }
     
     .header-right div {
-      margin-bottom: 6px;
-      background: rgba(255,255,255,0.1);
-      padding: 6px 12px;
-      border-radius: 6px;
-      backdrop-filter: blur(10px);
+      margin-bottom: 3px;
     }
     
     .content {
-      padding: 25px 30px;
+      padding: 20px;
     }
     
-    /* Stats Grid - 4 colunas */
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
       margin-bottom: 20px;
       page-break-after: avoid;
     }
     
     .stat-card {
-      background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-      border: 2px solid #e9ecef;
-      border-radius: 8px;
-      padding: 10px 12px;
+      background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+      border: 1.5px solid #073e29;
+      border-radius: 6px;
+      padding: 12px;
       text-align: center;
-      position: relative;
-      overflow: hidden;
-      transition: all 0.3s ease;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-    }
-    
-    .stat-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      border-color: #073e29;
-    }
-    
-    .stat-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, #073e29 0%, #0a4d33 100%);
-    }
-    
-    .stat-icon {
-      font-size: 20px;
-      margin-bottom: 4px;
     }
     
     .stat-title {
       font-size: 9px;
-      color: #6c757d;
-      font-weight: 700;
+      color: #073e29;
+      font-weight: bold;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
-      margin-bottom: 5px;
+      margin-bottom: 6px;
     }
     
     .stat-value {
-      font-size: 20px;
-      font-weight: 800;
+      font-size: 22px;
+      font-weight: bold;
       color: #073e29;
       margin-bottom: 3px;
-      line-height: 1;
     }
     
     .stat-subvalue {
-      font-size: 9px;
-      color: #6c757d;
-      font-weight: 600;
+      font-size: 10px;
+      color: #666;
     }
     
     .section-title {
-      font-size: 18px;
-      font-weight: 800;
+      font-size: 14px;
+      font-weight: bold;
       color: #073e29;
-      margin: 25px 0 15px 0;
-      padding-bottom: 10px;
-      border-bottom: 3px solid #073e29;
+      margin: 20px 0 12px 0;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #073e29;
       page-break-after: avoid;
-      display: flex;
-      align-items: center;
-      gap: 10px;
     }
     
-    .section-title::before {
-      content: '';
-      width: 5px;
-      height: 24px;
-      background: linear-gradient(180deg, #073e29 0%, #0a4d33 100%);
-      border-radius: 3px;
-    }
-    
-    /* Charts Grid - 2 colunas para A4 */
     .charts-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
       gap: 15px;
-      margin-bottom: 25px;
+      margin-bottom: 20px;
       page-break-inside: avoid;
     }
     
     .chart-card {
       background: white;
-      border: 2px solid #e9ecef;
-      border-radius: 10px;
+      border: 1.5px solid #e5e7eb;
+      border-radius: 6px;
       padding: 12px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
       page-break-inside: avoid;
-      transition: all 0.3s ease;
-    }
-    
-    .chart-card:hover {
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-      border-color: #073e29;
     }
     
     .chart-title {
       font-size: 11px;
-      font-weight: 700;
+      font-weight: bold;
       color: #073e29;
       margin-bottom: 10px;
       text-align: center;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
     }
     
-    .chart-container {
-      position: relative;
-      height: 180px; /* Altura fixa para consistência */
+    .bar-chart {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    
+    .bar-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    
+    .bar-label {
+      flex: 0 0 80px;
+      font-size: 9px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    
+    .bar-container {
+      flex: 1;
+      background: #e5e7eb;
+      height: 18px;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    
+    .bar-fill {
+      background: #073e29;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding-right: 6px;
+      color: white;
+      font-size: 8px;
+      font-weight: bold;
     }
     
     .insights-box {
-      background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-      border: 2px solid #073e29;
-      border-radius: 10px;
+      background: #f0fdf4;
+      border: 1.5px solid #073e29;
+      border-radius: 6px;
       padding: 12px;
-      margin-bottom: 15px;
+      margin-bottom: 20px;
       page-break-inside: avoid;
-      box-shadow: 0 2px 6px rgba(7,62,41,0.1);
     }
     
     .insights-title {
-      font-size: 14px;
-      font-weight: 800;
+      font-size: 12px;
+      font-weight: bold;
       color: #073e29;
       margin-bottom: 10px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
     }
     
     .insights-list {
@@ -495,96 +444,70 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     }
     
     .insights-list li {
-      padding: 6px 10px;
-      margin-bottom: 5px;
-      border-left: 3px solid #073e29;
-      background: white;
-      border-radius: 5px;
+      padding: 4px 0;
+      border-bottom: 1px solid #d1d5db;
       font-size: 10px;
       color: #374151;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    .insights-list li:last-child {
+      border-bottom: none;
     }
     
     .data-table {
       width: 100%;
-      border-collapse: separate;
-      border-spacing: 0;
-      margin-bottom: 30px;
-      font-size: 10px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-      border-radius: 10px;
-      overflow: hidden;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      font-size: 9px;
     }
     
     .data-table thead {
-      background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%);
+      background: #073e29;
       color: white;
     }
     
     .data-table th {
-      padding: 10px 8px;
+      padding: 6px 8px;
       text-align: left;
-      font-weight: 700;
+      font-weight: bold;
       font-size: 9px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
     }
     
     .data-table td {
-      padding: 8px;
-      border-bottom: 1px solid #e9ecef;
-      font-size: 10px;
+      padding: 5px 8px;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 9px;
     }
     
     .data-table tbody tr {
       page-break-inside: avoid;
-      transition: background-color 0.2s ease;
-    }
-    
-    .data-table tbody tr:hover {
-      background-color: #f8f9fa;
-    }
-    
-    .data-table tbody tr:last-child td {
-      border-bottom: none;
     }
     
     .intelligence-section {
-      background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%);
-      border: 2px solid #f97316;
-      border-radius: 10px;
-      padding: 12px;
-      margin-bottom: 15px;
+      background: #f0fdf4;
+      border: 1.5px solid #073e29;
+      border-radius: 6px;
+      padding: 15px;
+      margin-bottom: 20px;
       page-break-inside: avoid;
-      box-shadow: 0 2px 6px rgba(249,115,22,0.1);
     }
     
     .intelligence-title {
-      font-size: 14px;
-      font-weight: 800;
-      color: #ea580c;
-      margin-bottom: 10px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      font-size: 13px;
+      font-weight: bold;
+      color: #073e29;
+      margin-bottom: 12px;
     }
     
     .intelligence-subsection {
-      margin-bottom: 10px;
-      background: white;
-      padding: 10px;
-      border-radius: 6px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+      margin-bottom: 12px;
     }
     
     .intelligence-subsection h4 {
-      font-size: 11px;
-      color: #ea580c;
+      font-size: 10px;
+      color: #073e29;
       margin-bottom: 6px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      font-weight: bold;
     }
     
     .intelligence-subsection ul {
@@ -593,13 +516,9 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     }
     
     .intelligence-subsection li {
-      padding: 5px 8px;
-      font-size: 10px;
+      padding: 3px 0;
+      font-size: 9px;
       color: #374151;
-      border-left: 3px solid #f97316;
-      margin-bottom: 4px;
-      background: #fff7ed;
-      border-radius: 4px;
     }
     
     .page-break {
@@ -608,17 +527,9 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     
     .table-subtitle {
       color: #073e29;
-      margin: 20px 0 12px 0;
-      font-size: 14px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    .table-subtitle::before {
-      content: '▶';
-      color: #073e29;
+      margin: 12px 0 6px 0;
+      font-size: 10px;
+      font-weight: bold;
     }
     
     @media print {
@@ -628,49 +539,47 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
         color-adjust: exact !important;
       }
       
-      @page {
-        size: A4 portrait;
-        margin: 15mm;
-      }
-      
       .no-print {
         display: none !important;
       }
       
       body {
         padding: 0;
-        background: white !important;
+        background: #f5f5f5 !important;
       }
       
       .container {
         box-shadow: none;
-        border-radius: 0;
-        max-width: 100%;
       }
       
-      .chart-container {
-        height: 200px;
+      .header {
+        background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%) !important;
+        color: white !important;
       }
       
-      .page-break {
-        page-break-before: always;
+      .stat-card {
+        background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%) !important;
+        border: 1.5px solid #073e29 !important;
       }
       
-      .chart-card,
-      .stat-card,
-      .insights-box,
-      .intelligence-section {
-        page-break-inside: avoid;
-      }
-    }
-    
-    @media screen and (max-width: 768px) {
-      .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
+      .bar-fill {
+        background: #073e29 !important;
+        color: white !important;
       }
       
-      .charts-grid {
-        grid-template-columns: 1fr;
+      .insights-box, .intelligence-section {
+        background: #f0fdf4 !important;
+        border: 1.5px solid #073e29 !important;
+      }
+      
+      .data-table thead {
+        background: #073e29 !important;
+        color: white !important;
+      }
+      
+      .section-title {
+        color: #073e29 !important;
+        border-bottom: 2px solid #073e29 !important;
       }
     }
   </style>
@@ -684,9 +593,17 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
       ✖️ Fechar
     </button>
   </div>
+  
+  <script>
+    window.onbeforeprint = function() {
+      document.body.style.webkitPrintColorAdjust = 'exact';
+      document.body.style.colorAdjust = 'exact';
+      document.body.style.printColorAdjust = 'exact';
+    };
+  </script>
 
   <div class="container">
-    <!-- Header -->
+    <!-- PÁGINA 1: Header + Cards + Análises Gráficas -->
     <div class="header">
       <div class="header-left">
         <div class="logo">
@@ -704,58 +621,165 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     </div>
 
     <div class="content">
-      <!-- Stats Cards - 4 colunas, 2 linhas -->
+      <!-- Stats Cards -->
       <div class="stats-grid">
         <div class="stat-card">
-          <div class="stat-icon">📋</div>
           <div class="stat-title">NF Pendentes</div>
           <div class="stat-value">${stats.nfPendentes}</div>
           <div class="stat-subvalue">R$ ${stats.totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">❌</div>
           <div class="stat-title">NF Cancelamento</div>
           <div class="stat-value">${stats.nfCancelamento}</div>
           <div class="stat-subvalue">R$ ${stats.totalCancelamento.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">⏰</div>
           <div class="stat-title">NF em Atraso</div>
           <div class="stat-value">${stats.nfAtraso}</div>
           <div class="stat-subvalue">R$ ${stats.totalAtraso.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">✅</div>
           <div class="stat-title">NF Validadas</div>
           <div class="stat-value">${stats.nfValidadas}</div>
           <div class="stat-subvalue">R$ ${stats.totalValidadas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">💰</div>
           <div class="stat-title">Total Geral</div>
           <div class="stat-value">${data.length}</div>
           <div class="stat-subvalue">R$ ${stats.totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">📊</div>
           <div class="stat-title">% Pendente</div>
           <div class="stat-value">${percentualPendente}%</div>
           <div class="stat-subvalue">Pendentes / Processados</div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">🎯</div>
           <div class="stat-title">Ticket Médio</div>
-          <div class="stat-value">R$ ${ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
+          <div class="stat-value">R$ ${ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
           <div class="stat-subvalue">Por devolução</div>
         </div>
         <div class="stat-card">
-          <div class="stat-icon">📦</div>
           <div class="stat-title">Produtos Devolvidos</div>
           <div class="stat-value">${produtosDevolvidos}</div>
           <div class="stat-subvalue">Quantidade total</div>
         </div>
       </div>
 
+      <!-- Gráficos com barras visuais -->
+      <h2 class="section-title">📊 Análises Gráficas</h2>
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-title">Top 5 Clientes (Valor)</div>
+          <div class="bar-chart">
+            ${topClientesList.map((item: any) => {
+              const maxValue = Math.max(...topClientesList.map((i: any) => i.value));
+              const percentage = (item.value / maxValue) * 100;
+              return `
+                <div class="bar-item">
+                  <div class="bar-label">${item.name.substring(0, 12)}</div>
+                  <div class="bar-container">
+                    <div class="bar-fill" style="width: ${percentage}%">R$ ${item.value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        
+        <div class="chart-card">
+          <div class="chart-title">Top 5 Vendedores (Valor)</div>
+          <div class="bar-chart">
+            ${topVendedoresList.map((item: any) => {
+              const maxValue = Math.max(...topVendedoresList.map((i: any) => i.value));
+              const percentage = (item.value / maxValue) * 100;
+              return `
+                <div class="bar-item">
+                  <div class="bar-label">${item.name.substring(0, 12)}</div>
+                  <div class="bar-container">
+                    <div class="bar-fill" style="width: ${percentage}%">R$ ${item.value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        
+        <div class="chart-card">
+          <div class="chart-title">Top 5 Redes (Valor)</div>
+          <div class="bar-chart">
+            ${topRedesList.map((item: any) => {
+              const maxValue = Math.max(...topRedesList.map((i: any) => i.value));
+              const percentage = (item.value / maxValue) * 100;
+              return `
+                <div class="bar-item">
+                  <div class="bar-label">${item.name.substring(0, 12)}</div>
+                  <div class="bar-container">
+                    <div class="bar-fill" style="width: ${percentage}%">R$ ${item.value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        
+        <div class="chart-card">
+          <div class="chart-title">Distribuição por Município</div>
+          <div class="bar-chart">
+            ${municipioList.map((item: any) => {
+              const maxValue = Math.max(...municipioList.map((i: any) => i.value));
+              const percentage = (item.value / maxValue) * 100;
+              return `
+                <div class="bar-item">
+                  <div class="bar-label">${item.name.substring(0, 12)}</div>
+                  <div class="bar-container">
+                    <div class="bar-fill" style="width: ${percentage}%">R$ ${item.value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        
+        <div class="chart-card">
+          <div class="chart-title">Principais Motivos</div>
+          <div class="bar-chart">
+            ${motivosList.map((item: any) => {
+              const maxValue = Math.max(...motivosList.map((i: any) => i.value));
+              const percentage = (item.value / maxValue) * 100;
+              return `
+                <div class="bar-item">
+                  <div class="bar-label">${item.name.substring(0, 12)}</div>
+                  <div class="bar-container">
+                    <div class="bar-fill" style="width: ${percentage}%">${item.value}</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+        
+        <div class="chart-card">
+          <div class="chart-title">Produtos Críticos (Top 10)</div>
+          <div class="bar-chart">
+            ${topProdutosList.slice(0, 5).map((item: any) => {
+              const maxValue = Math.max(...topProdutosList.map((i: any) => i.quantidade));
+              const percentage = (item.quantidade / maxValue) * 100;
+              return `
+                <div class="bar-item">
+                  <div class="bar-label">${item.name.substring(0, 12)}</div>
+                  <div class="bar-container">
+                    <div class="bar-fill" style="width: ${percentage}%">${item.quantidade.toFixed(0)}</div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PÁGINA 2: Inteligência e Análises + Insights + Notas em Tratativa -->
+    <div class="content page-break">
       <!-- Inteligência e Análises -->
       <div class="intelligence-section">
         <div class="intelligence-title">🧠 Inteligência e Análises</div>
@@ -794,58 +818,6 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
         </ul>
       </div>
 
-      <!-- Gráficos - 2 por linha em formato A4 -->
-      <h2 class="section-title">📊 Análises Gráficas</h2>
-
-      <div class="charts-grid">
-        <div class="chart-card">
-          <div class="chart-title">Top 5 Clientes (Valor)</div>
-          <div class="chart-container">
-            <canvas id="chartClientes"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Top 5 Vendedores (Valor)</div>
-          <div class="chart-container">
-            <canvas id="chartVendedores"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Top 5 Redes (Valor)</div>
-          <div class="chart-container">
-            <canvas id="chartRedes"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Distribuição por Município</div>
-          <div class="chart-container">
-            <canvas id="chartMunicipios"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Principais Motivos</div>
-          <div class="chart-container">
-            <canvas id="chartMotivos"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Produtos Críticos (Top 10)</div>
-          <div class="chart-container">
-            <canvas id="chartProdutos"></canvas>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- PÁGINA 2: Tabelas Detalhadas -->
-    <div class="content page-break">
-      <h2 class="section-title">📋 Dados Detalhados</h2>
-      
       ${tratativas.length > 0 ? `
         <h3 class="table-subtitle">Notas em Tratativa de Anulação (${tratativas.length})</h3>
         <table class="data-table">
@@ -864,10 +836,10 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
             ${tratativas.slice(0, 50).map(item => `
               <tr>
                 <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
-                <td><strong>${item.numero || '-'}</strong></td>
+                <td>${item.numero || '-'}</td>
                 <td>${(item.nome_cliente || '-').substring(0, 30)}</td>
                 <td>${item.vendedor || '-'}</td>
-                <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
+                <td>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                 <td>${item.dias !== null && item.dias !== undefined ? item.dias : '-'}</td>
                 <td>${item.prazo || '-'}</td>
               </tr>
@@ -875,7 +847,12 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
           </tbody>
         </table>
       ` : ''}
+    </div>
 
+    <!-- PÁGINA 3+: Dados Detalhados -->
+    <div class="content page-break">
+      <h2 class="section-title">📋 Dados Detalhados</h2>
+      
       ${pendentes.length > 0 ? `
         <h3 class="table-subtitle">Notas Pendentes (${pendentes.length})</h3>
         <table class="data-table">
@@ -894,10 +871,10 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
             ${pendentes.slice(0, 50).map(item => `
               <tr>
                 <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
-                <td><strong>${item.numero || '-'}</strong></td>
+                <td>${item.numero || '-'}</td>
                 <td>${(item.nome_cliente || '-').substring(0, 30)}</td>
                 <td>${item.vendedor || '-'}</td>
-                <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
+                <td>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
                 <td>${item.dias !== null && item.dias !== undefined ? item.dias : '-'}</td>
                 <td>${item.prazo || '-'}</td>
               </tr>
@@ -923,11 +900,11 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
             ${validadas.slice(0, 50).map(item => `
               <tr>
                 <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
-                <td><strong>${item.numero || '-'}</strong></td>
+                <td>${item.numero || '-'}</td>
                 <td>${(item.nome_cliente || '-').substring(0, 30)}</td>
                 <td>${item.vendedor || '-'}</td>
                 <td>${item.motivo_nome || '-'}</td>
-                <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
+                <td>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -951,13 +928,13 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
           <tbody>
             ${produtosData.slice(0, 100).map(item => `
               <tr>
-                <td><strong>${item.nf}</strong></td>
+                <td>${item.nf}</td>
                 <td>${item.vendedor}</td>
                 <td>${item.cliente}</td>
                 <td>${item.produto}</td>
                 <td>${item.unidade}</td>
                 <td>${item.quantidade}</td>
-                <td><strong>${item.valor}</strong></td>
+                <td>${item.valor}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -965,336 +942,6 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
       ` : ''}
     </div>
   </div>
-
-  <script>
-    // Configuração padrão dos gráficos
-    Chart.defaults.font.family = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
-    Chart.defaults.font.size = 10;
-    Chart.defaults.color = '#374151';
-
-    const chartColors = {
-      primary: '#073e29',
-      secondary: '#0a4d33',
-      accent: '#16a34a',
-      gradient: ['#073e29', '#0a4d33', '#0d5d3f', '#10704b', '#138357']
-    };
-
-    // Gráfico de Clientes
-    new Chart(document.getElementById('chartClientes'), {
-      type: 'bar',
-      data: {
-        labels: ${JSON.stringify(topClientesList.map((item: any) => item.name.substring(0, 12)))},
-        datasets: [{
-          label: 'Valor (R$)',
-          data: ${JSON.stringify(topClientesList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: chartColors.primary,
-          borderWidth: 2,
-          borderRadius: 6
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-              }
-            }
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            grid: {
-              color: 'rgba(0, 0, 0, 0.05)'
-            },
-            ticks: {
-              font: { size: 9 },
-              callback: function(value) {
-                return 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-              }
-            }
-          },
-          x: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              font: { size: 9 }
-            }
-          }
-        }
-      }
-    });
-
-    // Gráfico de Vendedores
-    new Chart(document.getElementById('chartVendedores'), {
-      type: 'bar',
-      data: {
-        labels: ${JSON.stringify(topVendedoresList.map((item: any) => item.name.substring(0, 12)))},
-        datasets: [{
-          label: 'Valor (R$)',
-          data: ${JSON.stringify(topVendedoresList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: chartColors.primary,
-          borderWidth: 2,
-          borderRadius: 6
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-              }
-            }
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            grid: {
-              color: 'rgba(0, 0, 0, 0.05)'
-            },
-            ticks: {
-              font: { size: 9 },
-              callback: function(value) {
-                return 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-              }
-            }
-          },
-          x: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              font: { size: 9 }
-            }
-          }
-        }
-      }
-    });
-
-    // Gráfico de Redes
-    new Chart(document.getElementById('chartRedes'), {
-      type: 'doughnut',
-      data: {
-        labels: ${JSON.stringify(topRedesList.map((item: any) => item.name))},
-        datasets: [{
-          data: ${JSON.stringify(topRedesList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: 'white',
-          borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: {
-              padding: 10,
-              font: {
-                size: 9,
-                weight: 'bold'
-              }
-            }
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return context.label + ': R$ ' + context.parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-              }
-            }
-          }
-        }
-      }
-    });
-
-    // Gráfico de Municípios
-    new Chart(document.getElementById('chartMunicipios'), {
-      type: 'bar',
-      data: {
-        labels: ${JSON.stringify(municipioList.map((item: any) => item.name.substring(0, 12)))},
-        datasets: [{
-          label: 'Valor (R$)',
-          data: ${JSON.stringify(municipioList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: chartColors.primary,
-          borderWidth: 2,
-          borderRadius: 6
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return 'R$ ' + context.parsed.x.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            beginAtZero: true,
-            grid: {
-              color: 'rgba(0, 0, 0, 0.05)'
-            },
-            ticks: {
-              font: { size: 9 },
-              callback: function(value) {
-                return 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-              }
-            }
-          },
-          y: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              font: { size: 9 }
-            }
-          }
-        }
-      }
-    });
-
-    // Gráfico de Motivos
-    new Chart(document.getElementById('chartMotivos'), {
-      type: 'pie',
-      data: {
-        labels: ${JSON.stringify(motivosList.map((item: any) => item.name))},
-        datasets: [{
-          data: ${JSON.stringify(motivosList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: 'white',
-          borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: {
-              padding: 10,
-              font: {
-                size: 9,
-                weight: 'bold'
-              }
-            }
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return context.label + ': ' + context.parsed + ' ocorrências';
-              }
-            }
-          }
-        }
-      }
-    });
-
-    // Gráfico de Produtos
-    new Chart(document.getElementById('chartProdutos'), {
-      type: 'bar',
-      data: {
-        labels: ${JSON.stringify(topProdutosList.slice(0, 10).map((item: any) => item.name.substring(0, 12)))},
-        datasets: [{
-          label: 'Quantidade',
-          data: ${JSON.stringify(topProdutosList.slice(0, 10).map((item: any) => item.quantidade))},
-          backgroundColor: chartColors.gradient,
-          borderColor: chartColors.primary,
-          borderWidth: 2,
-          borderRadius: 6
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return context.parsed.x.toFixed(2) + ' unidades';
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            beginAtZero: true,
-            grid: {
-              color: 'rgba(0, 0, 0, 0.05)'
-            },
-            ticks: {
-              font: { size: 9 },
-              callback: function(value) {
-                return value.toFixed(0);
-              }
-            }
-          },
-          y: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              font: { size: 9 }
-            }
-          }
-        }
-      }
-    });
-  </script>
 </body>
 </html>
   `;

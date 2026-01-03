@@ -21,16 +21,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, AlertCircle, Save, ArrowUpDown, ArrowUp, ArrowDown, FileText, Trash2, Edit, Share2, CheckSquare, Square, X, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, AlertCircle, Save, ArrowUpDown, ArrowUp, ArrowDown, Trash2, Edit, Share2, CheckSquare, Square, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { useAuthStore, useFilterStore } from "@/lib/store";
-import { getDateRangeFromPeriod } from "@/lib/dateUtils";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import { getDateRangeFromPeriod, calculateBusinessDays } from "@/lib/dateUtils";
 
 type ResultadoStatus = 'PENDENTE VALIDAÇÃO' | 'VALIDADA' | 'LANÇADA' | 'TRATATIVA DE ANULAÇÃO' | 'ANULADA/CANCELADA';
 
@@ -63,7 +61,7 @@ function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(word => word.length > 0).length;
 }
 
-type SortField = 'data_emissao' | 'numero' | 'nome_cliente' | 'cidade_origem' | 'vendedor' | 'motivo' | 'valor_total_nota' | 'dias' | 'prazo' | 'resultado';
+type SortField = 'data_emissao' | 'numero' | 'nome_cliente' | 'vendedor' | 'motivo' | 'valor_total_nota' | 'dias' | 'prazo' | 'resultado';
 type SortDirection = 'asc' | 'desc' | null;
 
 export function ValidationPage() {
@@ -204,14 +202,37 @@ export function ValidationPage() {
     if (filters.vendedor && filters.vendedor.length > 0) {
       query = query.in('vendedor', filters.vendedor);
     }
+    // Filtro de setores será aplicado após buscar os dados (para considerar tanto setor_id quanto motivo_id)
+    // Buscar motivos que pertencem aos setores selecionados (se houver filtro de setor)
+    let setorMotivoIds: string[] = [];
     if (filters.setor && filters.setor.length > 0) {
+      const { data: motivosPorSetor } = await supabase
+        .from('motivos_devolucao')
+        .select('id')
+        .in('sector_id', filters.setor);
+      
+      setorMotivoIds = motivosPorSetor?.map((m: any) => m.id) || [];
+      
+      // Filtrar por setor_id diretamente na query (filtro adicional por motivo_id será aplicado depois)
       query = query.in('setor_id', filters.setor);
     }
+    
+    // Aplicar filtros de data considerando fuso horário de Salvador/Bahia (UTC-3)
     if (effectiveStartDate) {
-      query = query.gte('data_emissao', effectiveStartDate.toISOString().split('T')[0]);
+      // Ajustar para início do dia em Salvador/Bahia (UTC-3)
+      const startDate = new Date(effectiveStartDate);
+      startDate.setHours(0, 0, 0, 0);
+      // Converter para UTC considerando UTC-3
+      const startDateUTC = new Date(startDate.getTime() - (3 * 60 * 60 * 1000));
+      query = query.gte('data_emissao', startDateUTC.toISOString().split('T')[0]);
     }
     if (effectiveEndDate) {
-      query = query.lte('data_emissao', effectiveEndDate.toISOString().split('T')[0]);
+      // Ajustar para fim do dia em Salvador/Bahia (UTC-3)
+      const endDate = new Date(effectiveEndDate);
+      endDate.setHours(23, 59, 59, 999);
+      // Converter para UTC considerando UTC-3
+      const endDateUTC = new Date(endDate.getTime() - (3 * 60 * 60 * 1000));
+      query = query.lte('data_emissao', endDateUTC.toISOString().split('T')[0]);
     }
     
     const { data: devolucoes, error } = await query.order('created_at', { ascending: false });
@@ -220,9 +241,19 @@ export function ValidationPage() {
         toast.error("Erro ao carregar devoluções");
         console.error(error);
     } else if (devolucoes) {
+        // Aplicar filtro de setores adicional (se necessário filtrar por motivo_id também)
+        let devolucoesComFiltroSetor = devolucoes;
+        if (filters.setor && filters.setor.length > 0 && setorMotivoIds.length > 0) {
+          devolucoesComFiltroSetor = devolucoes.filter((d: any) => {
+            const temSetorId = d.setor_id && filters.setor!.includes(d.setor_id);
+            const temMotivoId = d.motivo_id && setorMotivoIds.includes(d.motivo_id);
+            return temSetorId || temMotivoId;
+          });
+        }
+        
         // Filtrar notas: mostrar apenas PENDENTE VALIDAÇÃO, VALIDADA e TRATATIVA DE ANULAÇÃO
         // LANÇADA e ANULADA/CANCELADA vão para a tela de Relatórios
-        const devolucoesFiltradas = devolucoes.filter((d: any) => {
+        const devolucoesFiltradas = devolucoesComFiltroSetor.filter((d: any) => {
           return d.resultado === 'PENDENTE VALIDAÇÃO' || 
                  d.resultado === 'VALIDADA' ||
                  d.resultado === 'TRATATIVA DE ANULAÇÃO';
@@ -318,6 +349,30 @@ export function ValidationPage() {
             nomeValidador = validadoresMap.get(key) || '-';
           }
           
+          // Calcular dias úteis baseado na data atual (horário de Salvador/Bahia - UTC-3) em relação à data de emissão
+          // Excluindo sábados e domingos
+          let diasCalculados = null;
+          if (item.data_emissao) {
+            try {
+              // Obter data atual no horário de Salvador/Bahia (UTC-3)
+              const agora = new Date();
+              const offsetSalvador = -3 * 60; // UTC-3 em minutos
+              const utc = agora.getTime() + (agora.getTimezoneOffset() * 60000);
+              const dataAtualSalvador = new Date(utc + (offsetSalvador * 60000));
+              dataAtualSalvador.setHours(0, 0, 0, 0);
+              
+              // Converter data de emissão para Date
+              const dataEmissao = new Date(item.data_emissao);
+              dataEmissao.setHours(0, 0, 0, 0);
+              
+              // Calcular diferença em dias úteis (excluindo sábados e domingos)
+              diasCalculados = calculateBusinessDays(dataEmissao, dataAtualSalvador);
+            } catch (err) {
+              console.warn('Erro ao calcular dias:', err);
+              diasCalculados = item.dias; // Usar valor do banco se houver erro
+            }
+          }
+          
           // Calcular prazo baseado no resultado
           let prazoCalculado = item.prazo;
           if (resultado === 'LANÇADA' || resultado === 'ANULADA/CANCELADA') {
@@ -328,7 +383,7 @@ export function ValidationPage() {
             prazoCalculado = 'CONCLUIDO';
           } else if (resultado === 'PENDENTE VALIDAÇÃO') {
             // Regra de prazo: dias >= 3 = EM ATRASO, dias < 3 = NO PRAZO
-            const dias = item.dias;
+            const dias = diasCalculados !== null ? diasCalculados : item.dias;
             if (dias !== null && dias !== undefined) {
               if (dias >= 3) {
                 prazoCalculado = 'EM ATRASO';
@@ -347,6 +402,7 @@ export function ValidationPage() {
             itens: itensProcessados,
             nome_validador: nomeValidador,
             prazo: prazoCalculado,
+            dias: diasCalculados !== null ? diasCalculados : item.dias, // Usar dias calculados
             // Preencher com dados do cliente se encontrado
             nome_cliente: cliente?.nome || item.nome_cliente || 'Cliente não encontrado',
             vendedor: cliente?.vendedor || item.vendedor || '-',
@@ -431,16 +487,20 @@ export function ValidationPage() {
             bValue = b.data_emissao ? new Date(b.data_emissao).getTime() : 0;
             break;
           case 'numero':
-            aValue = a.numero || '';
-            bValue = b.numero || '';
+            // Converter para número se possível, senão comparar como string
+            const numA = parseInt(a.numero || '0', 10) || 0;
+            const numB = parseInt(b.numero || '0', 10) || 0;
+            if (numA !== 0 || numB !== 0) {
+              aValue = numA;
+              bValue = numB;
+            } else {
+              aValue = (a.numero || '').toLowerCase();
+              bValue = (b.numero || '').toLowerCase();
+            }
             break;
           case 'nome_cliente':
             aValue = (a.nome_cliente || '').toLowerCase();
             bValue = (b.nome_cliente || '').toLowerCase();
-            break;
-          case 'cidade_origem':
-            aValue = (a.cidade_origem || '').toLowerCase();
-            bValue = (b.cidade_origem || '').toLowerCase();
             break;
           case 'vendedor':
             aValue = (a.vendedor || '').toLowerCase();
@@ -536,6 +596,39 @@ export function ValidationPage() {
       }
 
       try {
+        // VALIDAÇÃO: Não permitir mudar para LANÇADA sem todos os motivos preenchidos
+        if (novoResultadoTyped === 'LANÇADA') {
+          // Buscar a devolução com seus itens
+          const { data: devolucaoCompleta, error: fetchErrorValidacao } = await supabase
+            .from('devolucoes')
+            .select(`
+              *,
+              itens:itens_devolucao(id, motivo_id)
+            `)
+            .eq('id', id)
+            .single();
+          
+          if (fetchErrorValidacao) {
+            console.error('Erro ao buscar devolução:', fetchErrorValidacao);
+            throw fetchErrorValidacao;
+          }
+          
+          // Verificar se a devolução tem motivo principal
+          if (!devolucaoCompleta.motivo_id) {
+            toast.error('Não é possível lançar a nota sem o motivo principal preenchido.');
+            return;
+          }
+          
+          // Verificar se todos os itens têm motivo preenchido
+          if (devolucaoCompleta.itens && devolucaoCompleta.itens.length > 0) {
+            const itensSemMotivo = devolucaoCompleta.itens.filter((item: any) => !item.motivo_id);
+            if (itensSemMotivo.length > 0) {
+              toast.error(`Não é possível lançar a nota. ${itensSemMotivo.length} item(ns) ainda não possui(m) motivo preenchido.`);
+              return;
+            }
+          }
+        }
+        
         // Buscar resultado atual antes de atualizar
         const { data: devolucaoAtual, error: fetchError } = await supabase
           .from('devolucoes')
@@ -1309,477 +1402,6 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
     }
   };
 
-  const generatePDF = () => {
-    try {
-      const doc = new jsPDF('p', 'mm', 'a4');
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      let yPosition = 20;
-
-      // Cores corporativas (verde do app #073e29)
-      const primaryColor: [number, number, number] = [7, 62, 41]; // Verde principal #073e29
-      const secondaryColor: [number, number, number] = [10, 80, 55]; // Verde escuro
-      const successColor: [number, number, number] = [7, 62, 41]; // Verde
-      const warningColor: [number, number, number] = [251, 191, 36]; // Amarelo
-      const dangerColor: [number, number, number] = [239, 68, 68]; // Vermelho
-      const lightGreen: [number, number, number] = [220, 252, 231]; // Verde claro para fundo
-      const cardBorderColor: [number, number, number] = [7, 62, 41]; // Verde principal para bordas
-
-      // ========== CABEÇALHO ==========
-      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-      doc.rect(0, 0, pageWidth, 45, 'F');
-      
-      // Logo (tentar carregar a imagem)
-      try {
-        // Adicionar logo se disponível
-        const logoImg = new Image();
-        logoImg.src = '/logo.png';
-        doc.addImage(logoImg, 'PNG', 15, 8, 25, 25);
-      } catch (err) {
-        // Fallback: Logo simulado (quadrado verde com texto branco)
-        doc.setFillColor(255, 255, 255);
-        doc.rect(15, 8, 12, 12, 'F');
-        doc.setFillColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-        doc.rect(15.5, 8.5, 11, 11, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'bold');
-        doc.text('DM', 19, 16);
-      }
-      
-      // Nome do App
-      doc.setFontSize(22);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(255, 255, 255);
-      doc.text('Gestão de Devoluções', 45, 18);
-      
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(255, 255, 255);
-      doc.text('Grupo Doce Mel', 45, 28);
-      doc.text(`Relatório Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`, 15, 38);
-      
-      // Filial e Período
-      const periodoText = filters.startDate && filters.endDate 
-        ? `${format(filters.startDate, 'dd/MM/yyyy', { locale: ptBR })} a ${format(filters.endDate, 'dd/MM/yyyy', { locale: ptBR })}`
-        : filters.period || 'Período não especificado';
-      
-      doc.text(`Período: ${periodoText}`, pageWidth - 15, 20, { align: 'right' as any });
-      doc.text(`Filial: Todas`, pageWidth - 15, 30, { align: 'right' as any });
-
-      yPosition = 55;
-
-      // ========== CARDS DE ESTATÍSTICAS ==========
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Resumo Executivo', 15, yPosition);
-      yPosition += 10;
-
-      const cardWidth = (pageWidth - 45) / 3;
-      const cardHeight = 25;
-      let cardX = 15;
-      let cardY = yPosition;
-
-      // Card 1: NF Pendentes (com fundo verde claro e borda)
-      doc.setFillColor(lightGreen[0], lightGreen[1], lightGreen[2]);
-      doc.setDrawColor(cardBorderColor[0], cardBorderColor[1], cardBorderColor[2]);
-      doc.setLineWidth(0.5);
-      doc.rect(cardX, cardY, cardWidth, cardHeight, 'FD');
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.text('NF Pendentes', cardX + 5, cardY + 8);
-      doc.setFontSize(16);
-      doc.setTextColor(dangerColor[0], dangerColor[1], dangerColor[2]);
-      doc.text(stats.nfPendentes.toString(), cardX + 5, cardY + 18);
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`R$ ${stats.totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, cardX + 5, cardY + 23);
-
-      // Card 2: NF Cancelamento
-      cardX += cardWidth + 7.5;
-      doc.setFillColor(lightGreen[0], lightGreen[1], lightGreen[2]);
-      doc.setDrawColor(cardBorderColor[0], cardBorderColor[1], cardBorderColor[2]);
-      doc.setLineWidth(0.5);
-      doc.rect(cardX, cardY, cardWidth, cardHeight, 'FD');
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.text('NF Cancelamento', cardX + 5, cardY + 8);
-      doc.setFontSize(16);
-      doc.setTextColor(warningColor[0], warningColor[1], warningColor[2]);
-      doc.text(stats.nfCancelamento.toString(), cardX + 5, cardY + 18);
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`R$ ${stats.totalCancelamento.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, cardX + 5, cardY + 23);
-
-      // Card 3: NF em Atraso
-      cardX += cardWidth + 7.5;
-      doc.setFillColor(lightGreen[0], lightGreen[1], lightGreen[2]);
-      doc.setDrawColor(cardBorderColor[0], cardBorderColor[1], cardBorderColor[2]);
-      doc.setLineWidth(0.5);
-      doc.rect(cardX, cardY, cardWidth, cardHeight, 'FD');
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.text('NF em Atraso', cardX + 5, cardY + 8);
-      doc.setFontSize(16);
-      doc.setTextColor(dangerColor[0], dangerColor[1], dangerColor[2]);
-      doc.text(stats.nfAtraso.toString(), cardX + 5, cardY + 18);
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`R$ ${stats.totalAtraso.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, cardX + 5, cardY + 23);
-
-      yPosition += cardHeight + 15;
-
-      // Segunda linha de cards
-      cardX = 15;
-      cardY = yPosition;
-
-      // Card 4: Total Validadas
-      const nfValidadas = allData.filter(d => d.resultado === 'VALIDADA').length;
-      const totalValidadas = allData
-        .filter(d => d.resultado === 'VALIDADA')
-        .reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
-      
-      doc.setFillColor(lightGreen[0], lightGreen[1], lightGreen[2]);
-      doc.setDrawColor(cardBorderColor[0], cardBorderColor[1], cardBorderColor[2]);
-      doc.setLineWidth(0.5);
-      doc.rect(cardX, cardY, cardWidth, cardHeight, 'FD');
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.text('NF Validadas', cardX + 5, cardY + 8);
-      doc.setFontSize(16);
-      doc.setTextColor(successColor[0], successColor[1], successColor[2]);
-      doc.text(nfValidadas.toString(), cardX + 5, cardY + 18);
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`R$ ${totalValidadas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, cardX + 5, cardY + 23);
-
-      // Card 5: Total Lançadas
-      const nfLancadas = allData.filter(d => d.resultado === 'LANÇADA').length;
-      const totalLancadas = allData
-        .filter(d => d.resultado === 'LANÇADA')
-        .reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
-      
-      cardX += cardWidth + 7.5;
-      doc.setFillColor(lightGreen[0], lightGreen[1], lightGreen[2]);
-      doc.setDrawColor(cardBorderColor[0], cardBorderColor[1], cardBorderColor[2]);
-      doc.setLineWidth(0.5);
-      doc.rect(cardX, cardY, cardWidth, cardHeight, 'FD');
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.text('NF Lançadas', cardX + 5, cardY + 8);
-      doc.setFontSize(16);
-      doc.setTextColor(successColor[0], successColor[1], successColor[2]);
-      doc.text(nfLancadas.toString(), cardX + 5, cardY + 18);
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`R$ ${totalLancadas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, cardX + 5, cardY + 23);
-
-      // Card 6: Total Geral
-      const totalGeral = allData.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
-      cardX += cardWidth + 7.5;
-      doc.setFillColor(lightGreen[0], lightGreen[1], lightGreen[2]);
-      doc.setDrawColor(cardBorderColor[0], cardBorderColor[1], cardBorderColor[2]);
-      doc.setLineWidth(0.5);
-      doc.rect(cardX, cardY, cardWidth, cardHeight, 'FD');
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.text('Total Geral', cardX + 5, cardY + 8);
-      doc.setFontSize(16);
-      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-      doc.text(allData.length.toString(), cardX + 5, cardY + 18);
-      doc.setFontSize(8);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`R$ ${totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, cardX + 5, cardY + 23);
-
-      yPosition += cardHeight + 20;
-
-      // ========== TABELAS ==========
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-
-      // Tabela 1: Lista de Pendentes
-      const pendentes = allData.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO');
-      if (pendentes.length > 0) {
-        doc.text('1. Lista de Pendentes', 15, yPosition);
-        yPosition += 5;
-        
-        const pendentesData = pendentes.map(item => [
-          item.numero || '-',
-          item.vendedor || '-',
-          (item.nome_cliente || '-').substring(0, 30),
-          item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-',
-          `R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
-          item.prazo || '-',
-          item.dias !== null && item.dias !== undefined ? item.dias.toString() : '-',
-          item.resultado || '-'
-        ]);
-
-        autoTable(doc, {
-          head: [['NF', 'Vendedor', 'Cliente', 'Data Emissão', 'Valor', 'Prazo', 'Dias', 'Resultado']],
-          body: pendentesData,
-          startY: yPosition,
-          styles: { fontSize: 7, cellPadding: 2 },
-          headStyles: { fillColor: [primaryColor[0], primaryColor[1], primaryColor[2]], textColor: 255, fontStyle: 'bold' },
-          alternateRowStyles: { fillColor: [245, 245, 245] },
-          margin: { left: 15, right: 15 }
-        });
-
-        yPosition = (doc as any).lastAutoTable.finalY + 10;
-      }
-
-      // Nova página se necessário
-      if (yPosition > pageHeight - 50) {
-        doc.addPage();
-        yPosition = 20;
-      }
-
-      // Tabela 2: Lista em Tratativas
-      const tratativas = allData.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO');
-      if (tratativas.length > 0) {
-        doc.text('2. Lista em Tratativas', 15, yPosition);
-        yPosition += 5;
-        
-        const tratativasData = tratativas.map(item => [
-          item.numero || '-',
-          item.vendedor || '-',
-          (item.nome_cliente || '-').substring(0, 30),
-          item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-',
-          `R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
-          item.prazo || '-',
-          item.dias !== null && item.dias !== undefined ? item.dias.toString() : '-',
-          item.resultado || '-'
-        ]);
-
-        autoTable(doc, {
-          head: [['NF', 'Vendedor', 'Cliente', 'Data Emissão', 'Valor', 'Prazo', 'Dias', 'Resultado']],
-          body: tratativasData,
-          startY: yPosition,
-          styles: { fontSize: 7, cellPadding: 2 },
-          headStyles: { fillColor: [warningColor[0], warningColor[1], warningColor[2]], textColor: 255, fontStyle: 'bold' },
-          alternateRowStyles: { fillColor: [255, 250, 240] },
-          margin: { left: 15, right: 15 }
-        });
-
-        yPosition = (doc as any).lastAutoTable.finalY + 10;
-      }
-
-      // Nova página se necessário
-      if (yPosition > pageHeight - 50) {
-        doc.addPage();
-        yPosition = 20;
-      }
-
-      // Tabela 3: Lista Validadas
-      const validadas = allData.filter(d => d.resultado === 'VALIDADA');
-      if (validadas.length > 0) {
-        doc.text('3. Lista Validadas', 15, yPosition);
-        yPosition += 5;
-        
-        const validadasData = validadas.map(item => [
-          item.numero || '-',
-          item.vendedor || '-',
-          (item.nome_cliente || '-').substring(0, 30),
-          item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-',
-          `R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
-          item.prazo || '-',
-          item.dias !== null && item.dias !== undefined ? item.dias.toString() : '-',
-          item.resultado || '-'
-        ]);
-
-        autoTable(doc, {
-          head: [['NF', 'Vendedor', 'Cliente', 'Data Emissão', 'Valor', 'Prazo', 'Dias', 'Resultado']],
-          body: validadasData,
-          startY: yPosition,
-          styles: { fontSize: 7, cellPadding: 2 },
-          headStyles: { fillColor: [successColor[0], successColor[1], successColor[2]], textColor: 255, fontStyle: 'bold' },
-          alternateRowStyles: { fillColor: [240, 255, 240] },
-          margin: { left: 15, right: 15 }
-        });
-
-        yPosition = (doc as any).lastAutoTable.finalY + 10;
-      }
-
-      // Nova página se necessário
-      if (yPosition > pageHeight - 50) {
-        doc.addPage();
-        yPosition = 20;
-      }
-
-      // Tabela 4: Lista Completa com Produtos
-      doc.text('4. Lista Completa com Produtos', 15, yPosition);
-      yPosition += 5;
-
-      const produtosData: any[] = [];
-      allData.forEach(item => {
-        if (item.itens && item.itens.length > 0) {
-          item.itens.forEach((produto: any) => {
-            produtosData.push([
-              item.numero || '-',
-              item.vendedor || '-',
-              (item.nome_cliente || '-').substring(0, 25),
-              (produto.descricao || '-').substring(0, 30),
-              produto.unidade || '-',
-              produto.quantidade ? produto.quantidade.toString() : '-',
-              `R$ ${(Number(produto.valor_total_bruto) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
-            ]);
-          });
-        } else {
-          produtosData.push([
-            item.numero || '-',
-            item.vendedor || '-',
-            (item.nome_cliente || '-').substring(0, 25),
-            'Sem itens',
-            '-',
-            '-',
-            `R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`
-          ]);
-        }
-      });
-
-      autoTable(doc, {
-        head: [['NF', 'Vendedor', 'Cliente', 'Produto', 'Unidade', 'Quantidade', 'Valor']],
-        body: produtosData.slice(0, 50), // Limitar a 50 linhas para não sobrecarregar
-        startY: yPosition,
-        styles: { fontSize: 6, cellPadding: 1.5 },
-        headStyles: { fillColor: [secondaryColor[0], secondaryColor[1], secondaryColor[2]], textColor: 255, fontStyle: 'bold' },
-        alternateRowStyles: { fillColor: [250, 250, 250] },
-        margin: { left: 15, right: 15 }
-      });
-
-      yPosition = (doc as any).lastAutoTable.finalY + 10;
-
-      // Nova página se necessário
-      if (yPosition > pageHeight - 60) {
-        doc.addPage();
-        yPosition = 20;
-      }
-
-      // ========== SEÇÃO DE INTELIGÊNCIA ==========
-      doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-      doc.rect(0, yPosition - 5, pageWidth, 8, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Inteligência e Análises', 15, yPosition + 3);
-      yPosition += 15;
-
-      doc.setTextColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      
-      // Análise de Recorrência
-      const clientesRecorrentes = allData.reduce((acc: any, item) => {
-        const cliente = item.nome_cliente || 'Desconhecido';
-        acc[cliente] = (acc[cliente] || 0) + 1;
-        return acc;
-      }, {});
-      
-      const topClientes = Object.entries(clientesRecorrentes)
-        .sort(([, a]: any, [, b]: any) => b - a)
-        .slice(0, 5)
-        .map(([cliente, count]: any) => `${cliente}: ${count} devolução(ões)`);
-
-      doc.text('Clientes com Maior Recorrência:', 15, yPosition);
-      yPosition += 6;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      topClientes.forEach((text, index) => {
-        doc.text(`${index + 1}. ${text}`, 20, yPosition);
-        yPosition += 5;
-      });
-
-      yPosition += 5;
-
-      // Alertas
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('Alertas e Recomendações:', 15, yPosition);
-      yPosition += 6;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-
-      const alertas: string[] = [];
-      if (stats.nfAtraso > 0) {
-        alertas.push(`⚠ ${stats.nfAtraso} nota(s) fiscal(is) em atraso requerem atenção imediata`);
-      }
-      if (stats.nfPendentes > 10) {
-        alertas.push(`⚠ Alto volume de pendências (${stats.nfPendentes}) - considere revisar processos`);
-      }
-      if (stats.totalCancelamento > totalGeral * 0.1) {
-        alertas.push(`⚠ Taxa de cancelamento acima de 10% - investigar causas`);
-      }
-      if (allData.length > 0) {
-        const mediaDias = allData
-          .filter(d => d.dias !== null && d.dias !== undefined)
-          .reduce((sum, d) => sum + (d.dias || 0), 0) / allData.filter(d => d.dias !== null && d.dias !== undefined).length;
-        if (mediaDias > 30) {
-          alertas.push(`⚠ Tempo médio de processamento alto (${mediaDias.toFixed(1)} dias)`);
-        }
-      }
-
-      if (alertas.length === 0) {
-        alertas.push('✓ Nenhum alerta crítico identificado');
-      }
-
-      alertas.forEach((alerta) => {
-        doc.text(alerta, 20, yPosition);
-        yPosition += 5;
-      });
-
-      yPosition += 5;
-
-      // Histórico e Tendências
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('Tendências:', 15, yPosition);
-      yPosition += 6;
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-
-      const taxaValidacao = allData.length > 0 
-        ? ((validadas.length / allData.length) * 100).toFixed(1)
-        : '0';
-      const taxaCancelamento = allData.length > 0
-        ? ((stats.nfCancelamento / allData.length) * 100).toFixed(1)
-        : '0';
-
-      doc.text(`Taxa de Validação: ${taxaValidacao}%`, 20, yPosition);
-      yPosition += 5;
-      doc.text(`Taxa de Cancelamento: ${taxaCancelamento}%`, 20, yPosition);
-      yPosition += 5;
-      doc.text(`Total Processado: ${allData.length} nota(s) fiscal(is)`, 20, yPosition);
-
-      // Rodapé
-      const totalPages = doc.getNumberOfPages();
-      for (let i = 1; i <= totalPages; i++) {
-        doc.setPage(i);
-        doc.setFontSize(8);
-        doc.setTextColor(150, 150, 150);
-        doc.text(
-          `Página ${i} de ${totalPages} - Sistema de Devoluções`,
-          pageWidth / 2,
-          pageHeight - 10,
-          { align: 'center' }
-        );
-      }
-
-      // Salvar PDF
-      const fileName = `Relatorio_Devolucoes_${format(new Date(), 'yyyy-MM-dd_HH-mm-ss', { locale: ptBR })}.pdf`;
-      doc.save(fileName);
-      toast.success('PDF gerado com sucesso!');
-    } catch (error: any) {
-      console.error('Erro ao gerar PDF:', error);
-      toast.error('Erro ao gerar PDF: ' + error.message);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -1816,10 +1438,6 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                 Selecionar
               </>
             )}
-          </Button>
-          <Button variant="outline" onClick={generatePDF} className="w-full sm:w-auto">
-            <FileText className="mr-2 h-4 w-4" />
-            Gerar PDF
           </Button>
         </div>
       </div>
@@ -1970,12 +1588,6 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                     <SortIcon field="nome_cliente" />
                   </div>
                 </TableHead>
-                <TableHead className="min-w-[150px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('cidade_origem')}>
-                  <div className="flex items-center gap-1">
-                    Origem
-                    <SortIcon field="cidade_origem" />
-                  </div>
-                </TableHead>
                 <TableHead className="min-w-[150px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('vendedor')}>
                   <div className="flex items-center gap-1">
                     Vendedor
@@ -2046,7 +1658,6 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                     <div className="min-w-[100px] text-xs">{item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</div>
                                     <div className="min-w-[120px] font-medium text-xs">{item.numero}</div>
                                     <div className="min-w-[200px] truncate text-xs" title={item.nome_cliente}>{item.nome_cliente}</div>
-                                    <div className="min-w-[150px] text-xs">{item.cidade_origem}/{item.uf_origem}</div>
                                     <div className="min-w-[150px] truncate text-xs" title={item.vendedor}>{item.vendedor}</div>
                                     <div 
                                       className="w-40"
@@ -2238,6 +1849,11 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                             <AccordionContent>
                               <div className="px-4 pb-4">
                                 <div className="rounded-md border bg-muted/50 p-4">
+                                  <div className="mb-3 pb-2 border-b">
+                                    <p className="text-sm font-medium text-muted-foreground">
+                                      <span className="font-semibold">Origem:</span> {item.cidade_origem || '-'}/{item.uf_origem || '-'}
+                                    </p>
+                                  </div>
                                   <h4 className="font-semibold mb-2 text-sm">Itens da Devolução</h4>
                                   <Table>
                                     <TableHeader>

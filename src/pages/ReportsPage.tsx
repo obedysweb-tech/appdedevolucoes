@@ -21,7 +21,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { supabase } from "@/lib/supabase";
 import { useFilterStore, useAuthStore } from "@/lib/store";
 import { getDateRangeFromPeriod } from "@/lib/dateUtils";
-import { Loader2, FileSpreadsheet, FileText, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from "lucide-react";
+import { Loader2, FileSpreadsheet, FileText, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, Trash2, TrendingUp, TrendingDown } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import ExcelJS from 'exceljs';
@@ -52,6 +52,14 @@ export function ReportsPage() {
   const [deletingItem, setDeletingItem] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const [reportStats, setReportStats] = useState({
+    valorTotalLancado: 0,
+    notasLancadas: 0,
+    valorTotalAnulado: 0,
+    notasAnuladas: 0,
+    momPercent: 0,
+    yoyPercent: 0
+  });
   const itemsPerPage = 100;
 
   useEffect(() => {
@@ -106,16 +114,40 @@ export function ReportsPage() {
     if (filters.vendedor && filters.vendedor.length > 0) {
       query = query.in('vendedor', filters.vendedor);
     }
+    // Filtro de setores - será aplicado após buscar os dados
+    let setorMotivoIds: string[] = [];
     if (filters.setor && filters.setor.length > 0) {
+      // Buscar motivos que pertencem aos setores selecionados
+      const { data: motivosPorSetor } = await supabase
+        .from('motivos_devolucao')
+        .select('id')
+        .in('sector_id', filters.setor);
+      
+      setorMotivoIds = motivosPorSetor?.map((m: any) => m.id) || [];
+      
+      // Filtrar por setor_id diretamente na query
       query = query.in('setor_id', filters.setor);
     }
     
-    // Filtro de Data
+    // Armazenar setorMotivoIds para uso posterior no filtro
+    const setorMotivoIdsParaFiltro = setorMotivoIds;
+    
+    // Filtro de Data - considerando fuso horário de Salvador/Bahia (UTC-3)
     if (effectiveStartDate) {
-        query = query.gte('data_emissao', effectiveStartDate.toISOString().split('T')[0]);
+      // Ajustar para início do dia em Salvador/Bahia (UTC-3)
+      const startDate = new Date(effectiveStartDate);
+      startDate.setHours(0, 0, 0, 0);
+      // Converter para UTC considerando UTC-3
+      const startDateUTC = new Date(startDate.getTime() - (3 * 60 * 60 * 1000));
+      query = query.gte('data_emissao', startDateUTC.toISOString().split('T')[0]);
     }
     if (effectiveEndDate) {
-        query = query.lte('data_emissao', effectiveEndDate.toISOString().split('T')[0]);
+      // Ajustar para fim do dia em Salvador/Bahia (UTC-3)
+      const endDate = new Date(effectiveEndDate);
+      endDate.setHours(23, 59, 59, 999);
+      // Converter para UTC considerando UTC-3
+      const endDateUTC = new Date(endDate.getTime() - (3 * 60 * 60 * 1000));
+      query = query.lte('data_emissao', endDateUTC.toISOString().split('T')[0]);
     }
 
     const { data: devolucoes, error } = await query;
@@ -124,8 +156,18 @@ export function ReportsPage() {
       console.error(error);
       toast.error("Erro ao carregar dados do relatório");
     } else if (devolucoes) {
+      // Aplicar filtro de setores adicional (se necessário filtrar por motivo_id também)
+      let devolucoesComFiltroSetor = devolucoes;
+      if (filters.setor && filters.setor.length > 0 && setorMotivoIdsParaFiltro.length > 0) {
+        devolucoesComFiltroSetor = devolucoes.filter((d: any) => {
+          const temSetorId = d.setor_id && filters.setor!.includes(d.setor_id);
+          const temMotivoId = d.motivo_id && setorMotivoIdsParaFiltro.includes(d.motivo_id);
+          return temSetorId || temMotivoId;
+        });
+      }
+      
       // Buscar dados dos clientes baseado no CNPJ (para TODOS os dados)
-      const cnpjs = devolucoes
+      const cnpjs = devolucoesComFiltroSetor
         .map(d => d.cnpj_destinatario)
         .filter(cnpj => cnpj && cnpj.trim() !== '');
       
@@ -144,7 +186,7 @@ export function ReportsPage() {
       }
       
       // Formatar TODOS os dados (sem filtro de resultado) para o relatório HTML
-      const formattedAll = devolucoes.map((r: any) => {
+      const formattedAll = devolucoesComFiltroSetor.map((r: any) => {
         const cliente = clientesMap.get(r.cnpj_destinatario);
         return {
           ...r,
@@ -190,13 +232,71 @@ export function ReportsPage() {
       });
       
       setFilteredData(sortedDefault);
+      
+      // Calcular estatísticas para os cards
+      const notasLancadas = sortedAll.filter((d: any) => d.resultado === 'LANÇADA');
+      const notasAnuladas = sortedAll.filter((d: any) => d.resultado === 'ANULADA/CANCELADA');
+      
+      const valorTotalLancado = notasLancadas.reduce((sum: number, d: any) => sum + (Number(d.valor_total_nota) || 0), 0);
+      const valorTotalAnulado = notasAnuladas.reduce((sum: number, d: any) => sum + (Number(d.valor_total_nota) || 0), 0);
+      
+      // Calcular MoM (Month over Month) e YoY (Year over Year)
+      // Para MoM: comparar com o mês anterior (mesmo período)
+      // Para YoY: comparar com o mesmo período do ano anterior
+      let momPercent = 0;
+      let yoyPercent = 0;
+      
+      if (effectiveStartDate && effectiveEndDate) {
+        // Calcular período do mês anterior (mesmo número de dias)
+        const diffDays = Math.ceil((effectiveEndDate.getTime() - effectiveStartDate.getTime()) / (1000 * 60 * 60 * 24));
+        const lastMonthStart = new Date(effectiveStartDate);
+        lastMonthStart.setMonth(lastMonthStart.getMonth() - 1);
+        const lastMonthEnd = new Date(lastMonthStart);
+        lastMonthEnd.setDate(lastMonthEnd.getDate() + diffDays);
+        
+        // Buscar dados do mês anterior para MoM
+        const { data: dadosMesAnterior } = await supabase
+          .from('devolucoes')
+          .select('valor_total_nota, resultado')
+          .gte('data_emissao', lastMonthStart.toISOString().split('T')[0])
+          .lte('data_emissao', lastMonthEnd.toISOString().split('T')[0])
+          .eq('resultado', 'LANÇADA');
+        
+        const valorMesAnterior = dadosMesAnterior?.reduce((sum: number, d: any) => sum + (Number(d.valor_total_nota) || 0), 0) || 0;
+        momPercent = valorMesAnterior > 0 ? ((valorTotalLancado - valorMesAnterior) / valorMesAnterior) * 100 : 0;
+        
+        // Calcular período do ano anterior (mesmo período)
+        const lastYearStart = new Date(effectiveStartDate);
+        lastYearStart.setFullYear(lastYearStart.getFullYear() - 1);
+        const lastYearEnd = new Date(effectiveEndDate);
+        lastYearEnd.setFullYear(lastYearEnd.getFullYear() - 1);
+        
+        // Buscar dados do ano anterior para YoY
+        const { data: dadosAnoAnterior } = await supabase
+          .from('devolucoes')
+          .select('valor_total_nota, resultado')
+          .gte('data_emissao', lastYearStart.toISOString().split('T')[0])
+          .lte('data_emissao', lastYearEnd.toISOString().split('T')[0])
+          .eq('resultado', 'LANÇADA');
+        
+        const valorAnoAnterior = dadosAnoAnterior?.reduce((sum: number, d: any) => sum + (Number(d.valor_total_nota) || 0), 0) || 0;
+        yoyPercent = valorAnoAnterior > 0 ? ((valorTotalLancado - valorAnoAnterior) / valorAnoAnterior) * 100 : 0;
+      }
+      
+      setReportStats({
+        valorTotalLancado,
+        notasLancadas: notasLancadas.length,
+        valorTotalAnulado,
+        notasAnuladas: notasAnuladas.length,
+        momPercent,
+        yoyPercent
+      });
     }
     setLoading(false);
   };
 
-  // Função antiga de PDF - substituída pelo ReportHTML (mantida para referência)
-  // @ts-ignore - função legada não utilizada
-  const generatePDFLegacy = () => {
+  // Função para gerar PDF
+  const generatePDF = () => {
     try {
       const doc = new jsPDF('p', 'mm', 'a4');
       const pageWidth = doc.internal.pageSize.getWidth();
@@ -1360,9 +1460,123 @@ export function ReportsPage() {
               }
             }} className="w-full sm:w-auto">
                 <FileText className="mr-2 h-4 w-4" />
-                Gerar Relatório
+                Gerar Relatório HTML
+            </Button>
+            <Button variant="outline" onClick={generatePDF} className="w-full sm:w-auto">
+                <FileText className="mr-2 h-4 w-4" />
+                Gerar PDF
             </Button>
         </div>
+      </div>
+
+      {/* Cards de Estatísticas */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+        {/* Valor Total Lançado */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold">Valor Total Lançado</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              R$ {reportStats.valorTotalLancado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {reportStats.notasLancadas} nota(s) lançada(s)
+            </div>
+          </CardContent>
+        </Card>
+        
+        {/* Notas Lançadas */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold">Notas Lançadas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {reportStats.notasLancadas}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Total de notas com resultado LANÇADA
+            </div>
+          </CardContent>
+        </Card>
+        
+        {/* Valor Total Anulado */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold">Valor Total Anulado</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              R$ {reportStats.valorTotalAnulado.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {reportStats.notasAnuladas} nota(s) anulada(s)
+            </div>
+          </CardContent>
+        </Card>
+        
+        {/* Notas Anuladas */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold">Notas Anuladas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {reportStats.notasAnuladas}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Total de notas com resultado ANULADA/CANCELADA
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      
+      {/* Cards de Comparativo */}
+      <div className="grid gap-4 md:grid-cols-2 mb-6">
+        {/* MoM - Month over Month */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold">Comparativo MoM</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2">
+              {reportStats.momPercent >= 0 ? (
+                <TrendingUp className="h-6 w-6 text-red-600" />
+              ) : (
+                <TrendingDown className="h-6 w-6 text-green-600" />
+              )}
+              <div className="text-2xl font-bold" style={{ color: reportStats.momPercent >= 0 ? '#dc2626' : '#16a34a' }}>
+                {Math.abs(reportStats.momPercent).toFixed(2)}%
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Variação mês sobre mês (valor total)
+            </div>
+          </CardContent>
+        </Card>
+        
+        {/* YoY - Year over Year */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-semibold">Comparativo YoY</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center gap-2">
+              {reportStats.yoyPercent >= 0 ? (
+                <TrendingUp className="h-6 w-6 text-red-600" />
+              ) : (
+                <TrendingDown className="h-6 w-6 text-green-600" />
+              )}
+              <div className="text-2xl font-bold" style={{ color: reportStats.yoyPercent >= 0 ? '#dc2626' : '#16a34a' }}>
+                {Math.abs(reportStats.yoyPercent).toFixed(2)}%
+              </div>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Variação ano sobre ano (valor total)
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>

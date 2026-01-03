@@ -245,72 +245,82 @@ export function SettingsPage() {
       }
       
       if (authData.user) {
+        console.log("✅ Usuário criado no Auth:", authData.user.id, authData.user.email);
+        
         // Aguardar um pouco para garantir que o trigger criou o perfil
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 1500));
         
         // Verificar se o perfil foi criado pelo trigger
         let profileData = null;
-        let profileCheckError = null;
+        let attempts = 0;
+        const maxAttempts = 3;
         
-        const { data: initialProfileData, error: initialError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', authData.user.id)
-          .single();
-        
-        profileData = initialProfileData;
-        profileCheckError = initialError;
-        
-        if (profileCheckError || !profileData) {
-          console.error("Perfil não encontrado após criação, tentando criar manualmente:", profileCheckError);
+        while (attempts < maxAttempts && !profileData) {
+          attempts++;
+          console.log(`🔍 Tentativa ${attempts}/${maxAttempts} de verificar perfil...`);
           
-          // Aguardar mais um pouco - às vezes o trigger demora
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          
-          // Verificar novamente
-          const { data: profileDataRetry, error: profileCheckErrorRetry } = await supabase
+          const { data: profileCheck, error: profileError } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', authData.user.id)
             .single();
           
-          if (profileCheckErrorRetry || !profileDataRetry) {
-            // Tentar inserir se não existir (caso o trigger não tenha funcionado)
-            // Como ADMIN, devemos ter permissão para inserir
-            // NOVO USUÁRIO COM TIPO "NOVO"
-            const { error: insertError } = await supabase.from('profiles').insert({
-              id: authData.user.id,
-              name: newUserName,
-              email: newUserEmail.trim().toLowerCase(),
-              role: 'NOVO', // Tipo NOVO até admin atribuir outro role
-              vendedor: null
-            });
-            
-            if (insertError) {
-              console.error("Erro ao inserir perfil:", insertError);
-              toast.error(`Usuário criado no Auth, mas erro ao criar perfil: ${insertError.message}. O trigger pode ter falhado. Verifique o perfil manualmente no Supabase.`);
-              return;
-            }
-            // Se inseriu com sucesso, considerar como criado
-            profileData = { id: authData.user.id };
-          } else {
-            // Perfil foi criado na segunda tentativa
-            profileData = profileDataRetry;
+          if (profileError && profileError.code !== 'PGRST116') {
+            // PGRST116 = não encontrado, que é esperado se o trigger ainda não executou
+            console.warn("Erro ao verificar perfil:", profileError);
+          }
+          
+          if (profileCheck) {
+            profileData = profileCheck;
+            console.log("✅ Perfil encontrado:", profileData);
+            break;
+          }
+          
+          // Aguardar mais um pouco antes da próxima tentativa
+          if (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
           }
         }
         
-        if (profileData) {
-          // Atualizar perfil com dados adicionais (caso o trigger não tenha passado tudo)
-          // NOVO USUÁRIO COM TIPO "NOVO" - admin deve atribuir outro role depois
-          const { error: profileError } = await supabase.from('profiles').update({
-            name: newUserName,
-            role: 'NOVO', // Tipo NOVO até admin atribuir outro role
-            vendedor: null
-          }).eq('id', authData.user.id);
+        // Se o perfil ainda não foi criado, tentar criar manualmente
+        if (!profileData) {
+          console.log("⚠️ Perfil não encontrado após tentativas, criando manualmente...");
           
-          if (profileError) {
-            console.warn("Aviso ao atualizar perfil (pode ser normal):", profileError);
-            // Não retornar erro aqui, pois o perfil já existe
+          const { data: insertedProfile, error: insertError } = await supabase
+            .from('profiles')
+            .insert({
+              id: authData.user.id,
+              name: newUserName,
+              email: newUserEmail.trim().toLowerCase(),
+              role: 'NOVO',
+              vendedor: null
+            })
+            .select()
+            .single();
+          
+          if (insertError) {
+            console.error("❌ Erro ao inserir perfil:", insertError);
+            toast.error(`Usuário criado no Auth, mas erro ao criar perfil: ${insertError.message}. Verifique o perfil manualmente no Supabase.`);
+            return;
+          }
+          
+          profileData = insertedProfile;
+          console.log("✅ Perfil criado manualmente:", profileData);
+        } else {
+          // Se o perfil já existe, garantir que está com os dados corretos
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({
+              name: newUserName,
+              role: 'NOVO',
+              vendedor: null
+            })
+            .eq('id', authData.user.id);
+          
+          if (updateError) {
+            console.warn("⚠️ Aviso ao atualizar perfil:", updateError);
+          } else {
+            console.log("✅ Perfil atualizado com sucesso");
           }
         }
         

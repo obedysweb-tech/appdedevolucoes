@@ -67,7 +67,8 @@ export type Period =
   | "LAST_MONTH"
   | "THIS_QUARTER"
   | "THIS_SEMESTER"
-  | "THIS_YEAR";
+  | "THIS_YEAR"
+  | "LAST_YEAR_AND_THIS_YEAR";
 
 export interface Filters {
   search?: string;

@@ -144,13 +144,14 @@ export function FilterBar() {
 
         {/* Period Select */}
         <Select 
-            value={filters.period} 
-            onValueChange={(val: any) => setFilters({ period: val })}
+            value={filters.period || 'all'} 
+            onValueChange={(val: any) => setFilters({ period: val === 'all' ? undefined : val })}
         >
             <SelectTrigger className="w-full">
                 <SelectValue placeholder="Período" />
             </SelectTrigger>
             <SelectContent>
+                <SelectItem value="all">Todos os Períodos</SelectItem>
                 <SelectItem value="TODAY">Hoje</SelectItem>
                 <SelectItem value="YESTERDAY">Ontem</SelectItem>
                 <SelectItem value="THIS_WEEK">Esta Semana</SelectItem>
@@ -160,6 +161,7 @@ export function FilterBar() {
                 <SelectItem value="THIS_QUARTER">Trimestre Atual</SelectItem>
                 <SelectItem value="THIS_SEMESTER">Semestre Atual</SelectItem>
                 <SelectItem value="THIS_YEAR">Ano Atual</SelectItem>
+                <SelectItem value="LAST_YEAR_AND_THIS_YEAR">Ano Anterior + Ano Atual</SelectItem>
             </SelectContent>
         </Select>
       </div>

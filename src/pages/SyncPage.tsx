@@ -179,6 +179,51 @@ export function SyncPage() {
       return String(cnpj).replace(/[.\-\/\s]/g, '').trim();
   };
 
+  // Função robusta para normalizar valores numéricos
+  const normalizeNumericValue = (value: any): number | null => {
+      // Se já é um número válido, retornar diretamente
+      if (typeof value === 'number' && !isNaN(value)) {
+          return value;
+      }
+      
+      // Se é null, undefined ou vazio, retornar null
+      if (value === null || value === undefined || value === '') {
+          return null;
+      }
+      
+      // Converter para string e limpar
+      let str = String(value).trim();
+      
+      // Se ficou vazio após trim, retornar null
+      if (str === '') {
+          return null;
+      }
+      
+      // Remover espaços
+      str = str.replace(/\s/g, '');
+      
+      // Detectar formato brasileiro (ex: 1.234,56 ou 1234,56)
+      // Se tem vírgula, provavelmente é formato brasileiro
+      if (str.includes(',')) {
+          // Remover pontos (separadores de milhares)
+          str = str.replace(/\./g, '');
+          // Substituir vírgula por ponto (separador decimal)
+          str = str.replace(',', '.');
+      }
+      // Se não tem vírgula mas tem pontos, pode ser formato americano (ex: 1234.56)
+      // Nesse caso, manter como está
+      
+      // Tentar converter para número
+      const num = parseFloat(str);
+      
+      // Se não é um número válido, retornar null
+      if (isNaN(num)) {
+          return null;
+      }
+      
+      return num;
+  };
+
   // Função para carregar todos os clientes e criar um mapa CNPJ -> Dados do Cliente
   const loadCustomersMap = async (): Promise<Map<string, { nome: string, vendedor: string, rede: string }>> => {
       const customersMap = new Map<string, { nome: string, vendedor: string, rede: string }>();
@@ -257,7 +302,7 @@ export function SyncPage() {
                         nome_pj_emitente: String(row['Nome PJ Emitente'] || ''),
                         chave_acesso: String(row['Chave de Acesso'] || ''),
                         serie: String(row['Série'] || ''),
-                        peso_liquido: parseFloat(row['Peso líquido'] || '0'),
+                        peso_liquido: normalizeNumericValue(row['Peso líquido']) || 0,
                         tipo: String(row['Tipo'] || ''),
                         status_nfe: String(row['Status'] || ''),
                         sincronizacao_erp: String(row['Sincronização ERP'] || ''),
@@ -276,15 +321,15 @@ export function SyncPage() {
                 }
 
                 const returnEntry = returnsMap.get(invoiceNumber);
-                const itemTotal = parseFloat(row['[Item] Valor Total Bruto'] || '0');
+                const itemTotal = normalizeNumericValue(row['[Item] Valor Total Bruto']) || 0;
                 returnEntry.total_value += itemTotal;
                 
-                returnEntry.items.push({
+                    returnEntry.items.push({
                     description: row['[Item] Descrição'],
-                    quantity: parseFloat(row['[Item] Quantidade'] || '0'),
+                    quantity: normalizeNumericValue(row['[Item] Quantidade']) || 0,
                     unit: row['[Item] Unidade'],
-                    unit_value: parseFloat(row['[Item] Valor Unitário'] || '0'),
-                    total_value: itemTotal,
+                    unit_value: normalizeNumericValue(row['[Item] Valor Unitário']) || 0,
+                    total_value: normalizeNumericValue(itemTotal) || 0,
                     item_number: String(row['[Item] Número do Item.'] || '')
                 });
             }
@@ -404,7 +449,7 @@ export function SyncPage() {
                         nome_pj_emitente: returnData.nome_pj_emitente,
                         chave_acesso: returnData.chave_acesso || null,
                         serie: returnData.serie,
-                        peso_liquido: returnData.peso_liquido || null,
+                        peso_liquido: normalizeNumericValue(returnData.peso_liquido),
                         tipo: returnData.tipo,
                         status_nfe: returnData.status_nfe,
                         sincronizacao_erp: returnData.sincronizacao_erp,
@@ -416,7 +461,7 @@ export function SyncPage() {
                         etiquetas: returnData.etiquetas,
                         nome_filial: nomeFilial, // Preenchido baseado no CNPJ Destinatário da tabela emitentes
                         data_emissao: returnData.invoice_date,
-                        valor_total_nota: returnData.total_value,
+                        valor_total_nota: normalizeNumericValue(returnData.total_value) || 0,
                         vendedor: vendedor, // Preenchido baseado no CNPJ Emitente da tabela clientes
                         rede: redeCliente, // Preenchido baseado no CNPJ Emitente da tabela clientes
                         resultado: 'PENDENTE VALIDAÇÃO',
@@ -446,10 +491,10 @@ export function SyncPage() {
                     const itemsToInsert = returnData.items.map((item: any) => ({
                         devolucao_id: insertedReturn.id,
                         descricao: item.description,
-                        quantidade: item.quantity,
+                        quantidade: normalizeNumericValue(item.quantity) || 0,
                         unidade: item.unit,
-                        valor_unitario: item.unit_value,
-                        valor_total_bruto: item.total_value,
+                        valor_unitario: normalizeNumericValue(item.unit_value) || 0,
+                        valor_total_bruto: normalizeNumericValue(item.total_value) || 0,
                         numero_item: item.item_number
                     }));
 

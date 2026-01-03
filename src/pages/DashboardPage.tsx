@@ -15,7 +15,10 @@ import {
   RefreshCw,
   MapPin,
   PackageX,
-  XCircle
+  XCircle,
+  Info,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { 
   AreaChart, 
@@ -533,7 +536,7 @@ export function DashboardPage() {
             if (!unidade) return null;
             const unidadeUpper = unidade.toUpperCase().trim();
             // CX = CX1 = CXS = FD
-            if (['CX', 'CX1', 'CXI', 'CXS', 'FD'].includes(unidadeUpper)) {
+            if (['CX', 'CX1', 'CXI', 'CX10', 'CXS', 'FD'].includes(unidadeUpper)) {
                 return 'CX';
             }
             // UN = UND = UN1 = UNID = BD = BDJ = KG = KG1 = KGS = PTC = PT = PT1 = PC = PC1 = SC = SC1
@@ -762,10 +765,13 @@ export function DashboardPage() {
         // 1. Notas em atraso (prazo = 'EM ATRASO')
         const notasAtraso = devolucoes.filter(d => d.prazo === 'EM ATRASO');
         if (notasAtraso.length > 0) {
+            const valorTotal = notasAtraso.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
             alertsList.push({
                 type: 'warning',
                 message: `${notasAtraso.length} nota(s) em atraso`,
-                total: notasAtraso.length
+                count: notasAtraso.length,
+                total: notasAtraso.length,
+                value: valorTotal
             });
         }
         
@@ -774,6 +780,7 @@ export function DashboardPage() {
             alertsList.push({
                 type: 'info',
                 message: `Total de ${totalReturns} notas no período (acima de 50)`,
+                count: totalReturns,
                 total: totalReturns
             });
         }
@@ -781,20 +788,26 @@ export function DashboardPage() {
         // 3. Notas pendentes quando acima de 20
         const notasPendentes = devolucoes.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO');
         if (notasPendentes.length > 20) {
+            const valorTotal = notasPendentes.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
             alertsList.push({
                 type: 'warning',
                 message: `${notasPendentes.length} nota(s) pendentes de validação (acima de 20)`,
-                total: notasPendentes.length
+                count: notasPendentes.length,
+                total: notasPendentes.length,
+                value: valorTotal
             });
         }
         
         // 4. Notas com valores acima de 1000
         const notasValorAlto = devolucoes.filter(d => Number(d.valor_total_nota) > 1000);
         if (notasValorAlto.length > 0) {
+            const valorTotal = notasValorAlto.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
             alertsList.push({
                 type: 'warning',
                 message: `${notasValorAlto.length} nota(s) com valor acima de R$ 1.000,00`,
-                total: notasValorAlto.length
+                count: notasValorAlto.length,
+                total: notasValorAlto.length,
+                value: valorTotal
             });
         }
         
@@ -810,11 +823,14 @@ export function DashboardPage() {
         
         Object.entries(clientesPendentes).forEach(([cliente, notas]) => {
             if (notas.length > 5) {
+                const valorTotal = notas.reduce((sum: number, d: any) => sum + (Number(d.valor_total_nota) || 0), 0);
                 alertsList.push({
                     type: 'error',
                     message: `Cliente "${cliente}" tem ${notas.length} notas pendentes de validação`,
                     cliente: cliente,
-                    total: notas.length
+                    count: notas.length,
+                    total: notas.length,
+                    value: valorTotal
                 });
             }
         });
@@ -822,11 +838,14 @@ export function DashboardPage() {
         // 6. Notas em cancelamentos (TRATATIVA DE ANULAÇÃO)
         const notasCancelamento = devolucoes.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO');
         if (notasCancelamento.length > 0) {
+            const valorTotal = notasCancelamento.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
             alertsList.push({
                 type: 'error',
                 message: `${notasCancelamento.length} nota(s) em tratativa de anulação`,
-                detalhes: notasCancelamento.map(n => `${n.numero} - ${n.nome_cliente}`).slice(0, 3),
-                total: notasCancelamento.length
+                detalhes: notasCancelamento.map(n => `NF ${n.numero} - ${n.nome_cliente || 'Sem cliente'} - R$ ${(Number(n.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`),
+                count: notasCancelamento.length,
+                total: notasCancelamento.length,
+                value: valorTotal
             });
         }
         
@@ -840,96 +859,302 @@ export function DashboardPage() {
     }
   };
 
-  // Componente Velocímetro
+  // Componente Velocímetro - Novo modelo
   const Velocimetro = ({ value }: { value: number }) => {
-    const maxValue = 30000; // Valor máximo para o velocímetro (30 mil)
-    const percentage = Math.min((value / maxValue) * 100, 100);
+    // Definir os limites
+    const max = 40000;
+    const normalLimit = 10000;
+    const warningLimit = 20000;
     
-    // Determinar cor baseada no valor
-    let color = '#22c55e'; // Verde
-    if (value >= 20000) {
-      color = '#ef4444'; // Vermelho
-    } else if (value >= 10000) {
-      color = '#eab308'; // Amarelo
-    }
+    // Ângulo do ponteiro (de -90° a 90°, total 180°)
+    const percentage = Math.min(value / max, 1);
+    const angle = -90 + (percentage * 180);
     
-    // Calcular ângulo do ponteiro (180 graus = meia circunferência)
-    const angle = (percentage / 100) * 180 - 90; // -90 para começar à esquerda
+    // Determinar status
+    const getStatus = () => {
+      if (value < normalLimit) return { color: '#10b981', label: 'Normal', icon: '✓', bg: 'bg-green-50' };
+      if (value < warningLimit) return { color: '#f59e0b', label: 'Atenção', icon: '⚠', bg: 'bg-yellow-50' };
+      return { color: '#ef4444', label: 'Crítico', icon: '🚨', bg: 'bg-red-50' };
+    };
     
-    // Aumentar tamanho do velocímetro
-    const svgWidth = 400;
-    const svgHeight = 240;
-    const svgRadius = 160;
-    const svgCenterX = svgWidth / 2;
-    const svgCenterY = svgHeight / 2;
-    const svgPointerLength = 120;
-    
-    // Recalcular posição do ponteiro com novo tamanho
-    const svgPointerX = svgCenterX + svgPointerLength * Math.cos((angle * Math.PI) / 180);
-    const svgPointerY = svgCenterY + svgPointerLength * Math.sin((angle * Math.PI) / 180);
+    const status = getStatus();
     
     return (
-      <div className="relative w-full flex justify-center">
-        <svg width={svgWidth} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
-          {/* Arco de fundo (cinza) */}
-          <path
-            d={`M ${svgCenterX - svgRadius} ${svgCenterY + svgRadius} A ${svgRadius} ${svgRadius} 0 0 1 ${svgCenterX + svgRadius} ${svgCenterY + svgRadius}`}
-            fill="none"
-            stroke="#e5e7eb"
-            strokeWidth="20"
-            strokeLinecap="round"
-          />
-          
-          {/* Arco verde (0-10k) */}
-          <path
-            d={`M ${svgCenterX - svgRadius} ${svgCenterY + svgRadius} A ${svgRadius} ${svgRadius} 0 0 1 ${svgCenterX} ${svgCenterY - svgRadius}`}
-            fill="none"
-            stroke="#22c55e"
-            strokeWidth="20"
-            strokeLinecap="round"
-            opacity={value < 10000 ? 1 : 0.3}
-          />
-          
-          {/* Arco amarelo (10k-20k) */}
-          <path
-            d={`M ${svgCenterX} ${svgCenterY - svgRadius} A ${svgRadius} ${svgRadius} 0 0 1 ${svgCenterX + svgRadius} ${svgCenterY + svgRadius}`}
-            fill="none"
-            stroke="#eab308"
-            strokeWidth="20"
-            strokeLinecap="round"
-            opacity={value >= 10000 && value < 20000 ? 1 : value >= 20000 ? 0.3 : 0.3}
-          />
-          
-          {/* Arco vermelho (20k+) */}
-          {value >= 20000 && (
+      <div className="w-full max-w-sm mx-auto">
+        {/* SVG do Velocímetro */}
+        <div className="relative w-full" style={{ paddingBottom: '50%' }}>
+          <svg 
+            viewBox="0 0 200 120" 
+            className="absolute inset-0 w-full h-full"
+          >
+            {/* Arco Verde (0k - 10k) - 25% do arco */}
             <path
-              d={`M ${svgCenterX} ${svgCenterY - svgRadius} A ${svgRadius} ${svgRadius} 0 0 1 ${svgCenterX + svgRadius} ${svgCenterY + svgRadius}`}
+              d="M 20 100 A 80 80 0 0 1 65 35"
+              fill="none"
+              stroke="#10b981"
+              strokeWidth="20"
+              strokeLinecap="round"
+            />
+            
+            {/* Arco Amarelo (10k - 20k) - 25% do arco */}
+            <path
+              d="M 65 35 A 80 80 0 0 1 135 35"
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth="20"
+              strokeLinecap="round"
+            />
+            
+            {/* Arco Vermelho (20k - 40k) - 50% do arco */}
+            <path
+              d="M 135 35 A 80 80 0 0 1 180 100"
               fill="none"
               stroke="#ef4444"
               strokeWidth="20"
               strokeLinecap="round"
             />
-          )}
+            
+            {/* Marcações principais com labels */}
+            {[
+              { val: 0, angle: -90, label: '15k' },
+              { val: 10000, angle: -45, label: '20k' },
+              { val: 15000, angle: -22.5, label: '25k' },
+              { val: 20000, angle: 0, label: '35k' },
+              { val: 40000, angle: 90, label: '40k' }
+            ].map((mark, i) => {
+              const rad = (mark.angle * Math.PI) / 180;
+              const x1 = 100 + 70 * Math.cos(rad);
+              const y1 = 100 + 70 * Math.sin(rad);
+              const x2 = 100 + 85 * Math.cos(rad);
+              const y2 = 100 + 85 * Math.sin(rad);
+              
+              // Posição do texto
+              const textX = 100 + 98 * Math.cos(rad);
+              const textY = 100 + 98 * Math.sin(rad);
+              
+              return (
+                <g key={i}>
+                  <line
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke="#374151"
+                    strokeWidth="3"
+                  />
+                  <text
+                    x={textX}
+                    y={textY}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    className="text-[9px] fill-gray-700 font-bold"
+                  >
+                    {mark.label}
+                  </text>
+                </g>
+              );
+            })}
+            
+            {/* Marcações menores */}
+            {[5000, 12500, 17500, 25000, 30000, 35000].map((val, i) => {
+              const percentage = val / max;
+              const markAngle = -90 + (percentage * 180);
+              const rad = (markAngle * Math.PI) / 180;
+              const x1 = 100 + 75 * Math.cos(rad);
+              const y1 = 100 + 75 * Math.sin(rad);
+              const x2 = 100 + 85 * Math.cos(rad);
+              const y2 = 100 + 85 * Math.sin(rad);
+              
+              return (
+                <line
+                  key={`minor-${i}`}
+                  x1={x1}
+                  y1={y1}
+                  x2={x2}
+                  y2={y2}
+                  stroke="#9ca3af"
+                  strokeWidth="1.5"
+                />
+              );
+            })}
+            
+            {/* Ponteiro com design aprimorado */}
+            <g transform={`rotate(${angle} 100 100)`}>
+              {/* Sombra do ponteiro */}
+              <path
+                d="M 100 100 L 96 94 L 98 25 L 100 20 L 102 25 L 104 94 Z"
+                fill="rgba(0,0,0,0.15)"
+                transform="translate(2, 2)"
+              />
+              {/* Ponteiro principal */}
+              <path
+                d="M 100 100 L 96 94 L 98 25 L 100 20 L 102 25 L 104 94 Z"
+                fill={status.color}
+                stroke="#fff"
+                strokeWidth="1.5"
+              />
+              {/* Brilho no ponteiro */}
+              <path
+                d="M 100 20 L 99 25 L 99 70 L 100 70 Z"
+                fill="rgba(255,255,255,0.3)"
+              />
+            </g>
+            
+            {/* Centro do ponteiro com efeito 3D */}
+            <circle cx="101" cy="101" r="10" fill="rgba(0,0,0,0.1)" />
+            <circle cx="100" cy="100" r="10" fill="#fff" stroke={status.color} strokeWidth="3" />
+            <circle cx="100" cy="100" r="5" fill={status.color} />
+            <circle cx="98" cy="98" r="2" fill="rgba(255,255,255,0.6)" />
+          </svg>
+        </div>
+        
+        {/* Informações abaixo do velocímetro */}
+        <div className="mt-6 space-y-3">
+          {/* Valor principal com destaque */}
+          <div className={`${status.bg} rounded-xl p-5 border-2 shadow-lg`} style={{ borderColor: status.color }}>
+            <div className="text-center">
+              <div className="text-xs text-gray-600 font-medium mb-1">VALOR TOTAL</div>
+              <div className="text-4xl font-bold tracking-tight" style={{ color: status.color }}>
+                R$ {value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <div className="flex items-center justify-center gap-2 mt-3">
+                <span className="text-2xl">{status.icon}</span>
+                <span className="text-xl font-bold uppercase tracking-wide" style={{ color: status.color }}>
+                  {status.label}
+                </span>
+              </div>
+            </div>
+          </div>
           
-          {/* Ponteiro */}
-          <line
-            x1={svgCenterX}
-            y1={svgCenterY}
-            x2={svgPointerX}
-            y2={svgPointerY}
-            stroke={color}
-            strokeWidth="5"
-            strokeLinecap="round"
-          />
-          
-          {/* Círculo central */}
-          <circle cx={svgCenterX} cy={svgCenterY} r="15" fill={color} />
-          
-          {/* Marcadores */}
-          <text x={svgCenterX - svgRadius} y={svgCenterY + svgRadius + 20} fontSize="16" fill="#6b7280" fontWeight="bold">0</text>
-          <text x={svgCenterX} y={svgCenterY - svgRadius - 10} fontSize="16" fill="#6b7280" fontWeight="bold" textAnchor="middle">10k</text>
-          <text x={svgCenterX + svgRadius} y={svgCenterY + svgRadius + 20} fontSize="16" fill="#6b7280" fontWeight="bold" textAnchor="end">20k+</text>
-        </svg>
+          {/* Legenda com faixas de valores */}
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="text-center p-3 bg-green-50 rounded-lg border-2 border-green-200">
+              <div className="font-bold text-green-700 mb-1">✓ Normal</div>
+              <div className="text-green-600 font-semibold">0 - 10k</div>
+            </div>
+            <div className="text-center p-3 bg-yellow-50 rounded-lg border-2 border-yellow-200">
+              <div className="font-bold text-yellow-700 mb-1">⚠ Atenção</div>
+              <div className="text-yellow-600 font-semibold">10k - 20k</div>
+            </div>
+            <div className="text-center p-3 bg-red-50 rounded-lg border-2 border-red-200">
+              <div className="font-bold text-red-700 mb-1">🚨 Crítico</div>
+              <div className="text-red-600 font-semibold">20k - 40k</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Componente AlertCard para os alertas
+  const AlertCard = ({ alert }: { alert: any }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+    
+    const config = {
+      error: {
+        bg: 'bg-gradient-to-r from-red-50 to-red-100/50 dark:from-red-950/20 dark:to-red-900/10',
+        border: 'border-red-300 dark:border-red-800/50',
+        iconBg: 'bg-red-500',
+        textColor: 'text-red-800 dark:text-red-300',
+        icon: XCircle,
+        badge: 'bg-red-500 text-white'
+      },
+      warning: {
+        bg: 'bg-gradient-to-r from-amber-50 to-amber-100/50 dark:from-amber-950/20 dark:to-amber-900/10',
+        border: 'border-amber-300 dark:border-amber-800/50',
+        iconBg: 'bg-amber-500',
+        textColor: 'text-amber-800 dark:text-amber-300',
+        icon: AlertTriangle,
+        badge: 'bg-amber-500 text-white'
+      },
+      info: {
+        bg: 'bg-gradient-to-r from-blue-50 to-blue-100/50 dark:from-blue-950/20 dark:to-blue-900/10',
+        border: 'border-blue-300 dark:border-blue-800/50',
+        iconBg: 'bg-blue-500',
+        textColor: 'text-blue-800 dark:text-blue-300',
+        icon: Info,
+        badge: 'bg-blue-500 text-white'
+      }
+    };
+    
+    const style = config[alert.type as 'error' | 'warning' | 'info'];
+    const Icon = style.icon;
+    const hasDetails = alert.detalhes && alert.detalhes.length > 0;
+    const shouldShowDetails = hasDetails && alert.message.includes('tratativa de anulação');
+    
+    return (
+      <div className={`${style.bg} rounded-xl border-2 ${style.border} shadow-sm hover:shadow-md transition-all duration-200`}>
+        <div className="p-4">
+          <div className="flex items-start gap-3">
+            {/* Ícone */}
+            <div className={`${style.iconBg} rounded-lg p-2 shadow-lg flex-shrink-0`}>
+              <Icon className="h-5 w-5 text-white" />
+            </div>
+            
+            {/* Conteúdo */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-start justify-between gap-2">
+                <p className={`font-semibold text-sm leading-relaxed ${style.textColor}`}>
+                  {alert.message}
+                </p>
+                
+                {/* Badge com contador */}
+                {alert.count && (
+                  <span className={`${style.badge} px-2.5 py-1 rounded-full text-xs font-bold flex-shrink-0 shadow-sm`}>
+                    {alert.count}
+                  </span>
+                )}
+              </div>
+              
+              {/* Valor em destaque */}
+              {alert.value !== undefined && (
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className={`text-2xl font-bold ${style.textColor}`}>
+                    R$ {alert.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+              )}
+              
+              {/* Detalhes expansíveis */}
+              {shouldShowDetails && (
+                <div className="mt-3">
+                  <button
+                    onClick={() => setIsExpanded(!isExpanded)}
+                    className={`flex items-center gap-1 text-xs font-semibold ${style.textColor} hover:underline`}
+                  >
+                    {isExpanded ? (
+                      <>
+                        <ChevronUp className="h-3 w-3" />
+                        Ocultar detalhes
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="h-3 w-3" />
+                        Ver {alert.total} itens
+                      </>
+                    )}
+                  </button>
+                  
+                  {isExpanded && (
+                    <div className="mt-2 space-y-1 pl-4 border-l-2 border-current/20">
+                      {alert.detalhes!.slice(0, 5).map((detalhe: string, i: number) => (
+                        <div key={i} className={`text-xs ${style.textColor} opacity-90 flex items-start gap-2`}>
+                          <span className="mt-1">•</span>
+                          <span>{detalhe}</span>
+                        </div>
+                      ))}
+                      {alert.total! > 5 && (
+                        <div className={`text-xs font-semibold ${style.textColor} mt-2`}>
+                          ... e mais {alert.total! - 5} itens
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -1009,46 +1234,72 @@ export function DashboardPage() {
 
       {/* Alertas e Velocímetro */}
       <div className="grid gap-4 md:grid-cols-2">
-        {/* Alertas */}
+        {/* Alertas - Novo componente */}
         {alerts.length > 0 && (
-          <Card className="border-primary/20 bg-primary/5 dark:bg-primary/10">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm font-semibold text-primary">
-                <AlertTriangle className="h-4 w-4" />
-                Alertas ({alerts.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                {alerts.map((alert, idx) => (
-                  <div key={idx} className={`p-2 rounded-md border text-xs ${
-                    alert.type === 'error' ? 'bg-red-50/50 dark:bg-red-950/10 border-red-200 dark:border-red-800/50' :
-                    alert.type === 'warning' ? 'bg-amber-50/50 dark:bg-amber-950/10 border-amber-200 dark:border-amber-800/50' :
-                    'bg-primary/10 dark:bg-primary/20 border-primary/20 dark:border-primary/30'
-                  }`}>
-                    <div className={`font-medium ${
-                      alert.type === 'error' ? 'text-red-700 dark:text-red-400' :
-                      alert.type === 'warning' ? 'text-amber-700 dark:text-amber-400' :
-                      'text-primary dark:text-primary'
-                    }`}>
-                      {alert.message}
-                    </div>
-                    {/* Mostrar detalhes apenas para tratativa de anulação */}
-                    {alert.detalhes && alert.detalhes.length > 0 && alert.message.includes('tratativa de anulação') && (
-                      <div className="mt-1.5 text-xs text-muted-foreground">
-                        {alert.detalhes.map((d: string, i: number) => (
-                          <div key={i}>• {d}</div>
-                        ))}
-                        {alert.total > 3 && (
-                          <div className="mt-1 font-medium">... e mais {alert.total - 3}</div>
-                        )}
-                      </div>
-                    )}
+          <div className="bg-white dark:bg-gray-900 rounded-xl border-2 border-gray-200 dark:border-gray-700 shadow-lg">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 p-6 border-b-2 border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="bg-gradient-to-br from-orange-500 to-red-500 rounded-xl p-3 shadow-lg">
+                    <AlertTriangle className="h-6 w-6 text-white" />
                   </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-gray-200">Central de Alertas</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">Monitoramento de devoluções e pendências</p>
+                  </div>
+                </div>
+                
+                {/* Resumo de badges */}
+                <div className="flex items-center gap-2">
+                  {alerts.filter(a => a.type === 'error').length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-red-100 dark:bg-red-900/30 px-3 py-1.5 rounded-full border border-red-300 dark:border-red-700">
+                      <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                      <span className="text-sm font-bold text-red-700 dark:text-red-300">{alerts.filter(a => a.type === 'error').length}</span>
+                    </div>
+                  )}
+                  {alerts.filter(a => a.type === 'warning').length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-amber-100 dark:bg-amber-900/30 px-3 py-1.5 rounded-full border border-amber-300 dark:border-amber-700">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                      <span className="text-sm font-bold text-amber-700 dark:text-amber-300">{alerts.filter(a => a.type === 'warning').length}</span>
+                    </div>
+                  )}
+                  {alerts.filter(a => a.type === 'info').length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-blue-100 dark:bg-blue-900/30 px-3 py-1.5 rounded-full border border-blue-300 dark:border-blue-700">
+                      <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      <span className="text-sm font-bold text-blue-700 dark:text-blue-300">{alerts.filter(a => a.type === 'info').length}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            {/* Lista de alertas */}
+            <div className="p-6">
+              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                {alerts.map((alert, idx) => (
+                  <AlertCard key={idx} alert={alert} />
                 ))}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+            
+            <style>{`
+              .custom-scrollbar::-webkit-scrollbar {
+                width: 8px;
+              }
+              .custom-scrollbar::-webkit-scrollbar-track {
+                background: #f1f5f9;
+                border-radius: 10px;
+              }
+              .custom-scrollbar::-webkit-scrollbar-thumb {
+                background: #cbd5e1;
+                border-radius: 10px;
+              }
+              .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                background: #94a3b8;
+              }
+            `}</style>
+          </div>
         )}
         
         {/* Velocímetro */}
@@ -1060,19 +1311,7 @@ export function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-0">
-            <div className="flex justify-center items-center py-2">
-              <Velocimetro value={velocimetroValue} />
-            </div>
-            <div className="text-center mt-2">
-              <div className="text-xl font-bold">
-                R$ {velocimetroValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">
-                {velocimetroValue < 10000 && <span className="text-green-600 font-semibold">✓ Status Normal</span>}
-                {velocimetroValue >= 10000 && velocimetroValue < 20000 && <span className="text-yellow-600 font-semibold">⚠ Atenção</span>}
-                {velocimetroValue >= 20000 && <span className="text-red-600 font-semibold">🚨 Crítico</span>}
-              </div>
-            </div>
+            <Velocimetro value={velocimetroValue} />
           </CardContent>
         </Card>
       </div>

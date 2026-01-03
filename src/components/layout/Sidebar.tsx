@@ -100,10 +100,11 @@ export function Sidebar({ className, isOpen = false, onClose }: SidebarProps) {
             <img 
               src="https://i.ibb.co/b095hpJ/Chat-GPT-Image-25-de-dez-de-2025-15-24-45.png" 
               alt="Logo Doce Mel" 
-              className="object-contain h-full w-full"
+              className="object-contain rounded"
             />
+
           </div>
-          <h2 className="text-xl font-bold tracking-tight text-primary font-serif">Doce Mel</h2>
+          <h2 className="text-xl font-bold tracking-tight text-primary font-serif">TRIELO CD BA</h2>
           <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">Gestão de Devoluções</p>
         </div>
         
@@ -193,10 +194,10 @@ export function Sidebar({ className, isOpen = false, onClose }: SidebarProps) {
             <img 
               src="https://i.ibb.co/b095hpJ/Chat-GPT-Image-25-de-dez-de-2025-15-24-45.png" 
               alt="Logo Doce Mel" 
-              className="object-contain h-full w-full"
+              className="object-contain rounded"
             />
           </div>
-          <h2 className="text-xl font-bold tracking-tight text-primary font-serif">Doce Mel</h2>
+          <h2 className="text-xl font-bold tracking-tight text-foreground font-serif">TRIELO CD BA</h2>
           <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">Gestão de Devoluções</p>
         </div>
         
