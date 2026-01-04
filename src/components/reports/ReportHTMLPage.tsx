@@ -130,7 +130,6 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     alertas.push('✅ Nenhum alerta crítico identificado');
   }
 
-  const validadas = data.filter(d => d.resultado === 'VALIDADA');
 
   const periodoText = filters.startDate && filters.endDate 
     ? `${format(filters.startDate, 'dd/MM/yyyy', { locale: ptBR })} a ${format(filters.endDate, 'dd/MM/yyyy', { locale: ptBR })}`
@@ -157,6 +156,7 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
   // Tabelas de dados
   const pendentes = data.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO');
   const tratativas = data.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO');
+  const validadasParaTabela = data.filter(d => d.resultado === 'VALIDADA');
 
   // Lista completa com produtos (apenas PENDENTE VALIDAÇÃO)
   const produtosData: any[] = [];
@@ -616,33 +616,6 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
       </table>
     ` : ''}
 
-    ${validadas.length > 0 ? `
-      <div class="data-table-title">Notas Validadas (${validadas.length})</div>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>Data Emissão</th>
-            <th>NF</th>
-            <th>Cliente</th>
-            <th>Vendedor</th>
-            <th>Motivo</th>
-            <th>Valor</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${validadas.slice(0, 50).map(item => `
-            <tr>
-              <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
-              <td><strong>${item.numero || '-'}</strong></td>
-              <td>${(item.nome_cliente || '-').substring(0, 20)}</td>
-              <td>${(item.vendedor || '-').substring(0, 15)}</td>
-              <td>${(item.motivo_nome || '-').substring(0, 20)}</td>
-              <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    ` : ''}
 
     ${produtosData.length > 0 ? `
       <div class="data-table-title">Lista Completa com Produtos (${produtosData.length})</div>
@@ -668,6 +641,95 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
               <td>${item.unidade}</td>
               <td>${item.quantidade}</td>
               <td><strong>${item.valor}</strong></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
+
+    <!-- Tabela 1: Validações Realizadas (resultado = VALIDADA) -->
+    ${validadasParaTabela.length > 0 ? `
+      <div class="data-table-title">Validações Realizadas (${validadasParaTabela.length})</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Data Emissão</th>
+            <th>NF</th>
+            <th>Cliente</th>
+            <th>Valor</th>
+            <th>Motivo</th>
+            <th>Setor</th>
+            <th>Data Validação</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${validadasParaTabela.map(item => `
+            <tr>
+              <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
+              <td><strong>${item.numero || '-'}</strong></td>
+              <td>${(item.nome_cliente || '-').substring(0, 20)}</td>
+              <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
+              <td>${(item.motivo_nome || '-').substring(0, 20)}</td>
+              <td>${(item.setor_nome || '-').substring(0, 15)}</td>
+              <td>${item.data_validacao ? format(new Date(item.data_validacao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
+
+    <!-- Tabela 2: Em Tratativa (resultado = TRATATIVA DE ANULAÇÃO) -->
+    ${tratativas.length > 0 ? `
+      <div class="data-table-title">Em Tratativa (${tratativas.length})</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Data Emissão</th>
+            <th>NF</th>
+            <th>Cliente</th>
+            <th>Valor</th>
+            <th>Observação</th>
+            <th>Data Validação</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tratativas.map(item => `
+            <tr>
+              <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
+              <td><strong>${item.numero || '-'}</strong></td>
+              <td>${(item.nome_cliente || '-').substring(0, 20)}</td>
+              <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
+              <td>${(item.justificativa || '-').substring(0, 30)}</td>
+              <td>${item.data_validacao ? format(new Date(item.data_validacao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
+
+    <!-- Tabela 3: Pendências (resultado = PENDENTE VALIDAÇÃO) -->
+    ${pendentes.length > 0 ? `
+      <div class="data-table-title">Pendências (${pendentes.length})</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Data Emissão</th>
+            <th>NF</th>
+            <th>Cliente</th>
+            <th>Valor</th>
+            <th>Dias</th>
+            <th>Prazo</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pendentes.map(item => `
+            <tr>
+              <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
+              <td><strong>${item.numero || '-'}</strong></td>
+              <td>${(item.nome_cliente || '-').substring(0, 20)}</td>
+              <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
+              <td>${item.dias !== null && item.dias !== undefined ? item.dias : '-'}</td>
+              <td>${item.prazo || '-'}</td>
             </tr>
           `).join('')}
         </tbody>

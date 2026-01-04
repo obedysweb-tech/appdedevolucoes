@@ -669,9 +669,12 @@ export function ValidationPage() {
         
         const nomeUsuario = user.name || user.email || '-';
         
-        // Salvar validada_por para VALIDADA ou TRATATIVA DE ANULAÇÃO
-        if (novoResultadoTyped === 'VALIDADA' || novoResultadoTyped === 'TRATATIVA DE ANULAÇÃO') {
+        // Salvar validada_por e data_validacao para VALIDADA ou TRATATIVA DE ANULAÇÃO
+        // Apenas se o resultado anterior era PENDENTE VALIDAÇÃO
+        if ((novoResultadoTyped === 'VALIDADA' || novoResultadoTyped === 'TRATATIVA DE ANULAÇÃO') && 
+            resultadoAtual === 'PENDENTE VALIDAÇÃO') {
           updateData.nome_validador = nomeUsuario;
+          updateData.data_validacao = new Date().toISOString();
         }
         
         // Salvar finalizada_por e data_finalizacao para LANÇADA ou ANULADA/CANCELADA
@@ -775,14 +778,21 @@ export function ValidationPage() {
       }
 
       // Depois de atualizar todos os produtos, atualizar motivo, resultado para VALIDADA, prazo CONCLUIDO e nome_validador
+      const updateData: any = { 
+        motivo_id: motivoId,
+        resultado: 'VALIDADA',
+        prazo: 'CONCLUIDO',
+        nome_validador: user.name || user.email || '-'
+      };
+      
+      // Salvar data_validacao se o resultado anterior era PENDENTE VALIDAÇÃO
+      if (statusAnterior === 'PENDENTE VALIDAÇÃO') {
+        updateData.data_validacao = new Date().toISOString();
+      }
+      
       const { error: updateError } = await supabase
           .from('devolucoes')
-          .update({ 
-            motivo_id: motivoId,
-            resultado: 'VALIDADA',
-            prazo: 'CONCLUIDO',
-            nome_validador: user.name || user.email || '-'
-          })
+          .update(updateData)
           .eq('id', id);
       
       if (updateError) throw updateError;
@@ -1184,6 +1194,12 @@ export function ValidationPage() {
           nome_validador: nomeValidador,
           motivo_id: motivoParaSalvar
         };
+
+        // Salvar data_validacao se o resultado anterior era PENDENTE VALIDAÇÃO
+        const resultadoAnterior = devolucaoAntes?.resultado || 'PENDENTE VALIDAÇÃO';
+        if (resultadoAnterior === 'PENDENTE VALIDAÇÃO') {
+          updateData.data_validacao = new Date().toISOString();
+        }
 
         console.log('Atualizando devolução com:', updateData);
 
