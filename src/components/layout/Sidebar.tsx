@@ -116,48 +116,48 @@ export function Sidebar({ className, isOpen = false, onClose }: SidebarProps) {
         
         {/* Menu Items - apenas se não for usuário NOVO */}
         {!isNovoUser && (
-          <div className="flex-1 overflow-y-auto py-4 px-3">
-            <div className="space-y-1">
-              {filteredRoutes.map((route) => (
-                <Link key={route.href} to={route.href}>
-                  <Button 
-                    variant={location.pathname === route.href ? "secondary" : "ghost"} 
-                    className={cn(
-                      "w-full justify-start transition-all duration-200 mb-1",
-                      location.pathname === route.href 
-                          ? "bg-primary/10 text-primary font-bold border-r-4 border-primary rounded-r-none dark:text-primary dark:bg-primary/20" 
-                          : "hover:bg-muted text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <route.icon className={cn("mr-3 h-4 w-4", location.pathname === route.href ? "text-primary" : "text-muted-foreground")} />
-                    {route.label}
-                  </Button>
-                </Link>
-              ))}
-            </div>
+        <div className="flex-1 overflow-y-auto py-4 px-3">
+          <div className="space-y-1">
+            {filteredRoutes.map((route) => (
+              <Link key={route.href} to={route.href}>
+                <Button 
+                  variant={location.pathname === route.href ? "secondary" : "ghost"} 
+                  className={cn(
+                    "w-full justify-start transition-all duration-200 mb-1",
+                    location.pathname === route.href 
+                        ? "bg-primary/10 text-primary font-bold border-r-4 border-primary rounded-r-none dark:text-primary dark:bg-primary/20" 
+                        : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <route.icon className={cn("mr-3 h-4 w-4", location.pathname === route.href ? "text-primary" : "text-muted-foreground")} />
+                  {route.label}
+                </Button>
+              </Link>
+            ))}
           </div>
+        </div>
         )}
         
         {/* Footer / User Profile */}
         <div className="p-4 border-t border-border/50 bg-muted/10">
           {!isNovoUser && (
-            <div className="flex justify-between items-center mb-4 px-2">
-              <span className="text-xs font-semibold text-muted-foreground">Tema</span>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleTheme}>
-                <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-                <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-              </Button>
-            </div>
+          <div className="flex justify-between items-center mb-4 px-2">
+            <span className="text-xs font-semibold text-muted-foreground">Tema</span>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleTheme}>
+              <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+              <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+            </Button>
+          </div>
           )}
 
           <div className="space-y-1 mb-4">
             {!isNovoUser && (
-              <Link to="/profile">
-                <Button variant={location.pathname === "/profile" ? "secondary" : "ghost"} className="w-full justify-start h-9">
-                  <User className="mr-2 h-4 w-4" />
-                  Perfil
-                </Button>
-              </Link>
+            <Link to="/profile">
+              <Button variant={location.pathname === "/profile" ? "secondary" : "ghost"} className="w-full justify-start h-9">
+                <User className="mr-2 h-4 w-4" />
+                Perfil
+              </Button>
+            </Link>
             )}
             <Button variant="ghost" className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10 h-9" onClick={logout}>
               <LogOut className="mr-2 h-4 w-4" />
@@ -209,48 +209,48 @@ export function Sidebar({ className, isOpen = false, onClose }: SidebarProps) {
         
         {/* Menu Items - apenas se não for usuário NOVO */}
         {!isNovoUser && (
-          <div className="flex-1 overflow-y-auto py-4 px-3">
-            <div className="space-y-1">
-              {filteredRoutes.map((route) => (
-                <Link key={route.href} to={route.href} onClick={onClose}>
-                  <Button 
-                    variant={location.pathname === route.href ? "secondary" : "ghost"} 
-                    className={cn(
-                      "w-full justify-start transition-all duration-200 mb-1",
-                      location.pathname === route.href 
-                          ? "bg-primary/10 text-primary font-bold border-r-4 border-primary rounded-r-none dark:text-primary dark:bg-primary/20" 
-                          : "hover:bg-muted text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <route.icon className={cn("mr-3 h-4 w-4", location.pathname === route.href ? "text-primary" : "text-muted-foreground")} />
-                    {route.label}
-                  </Button>
-                </Link>
-              ))}
-            </div>
+        <div className="flex-1 overflow-y-auto py-4 px-3">
+          <div className="space-y-1">
+            {filteredRoutes.map((route) => (
+              <Link key={route.href} to={route.href} onClick={onClose}>
+                <Button 
+                  variant={location.pathname === route.href ? "secondary" : "ghost"} 
+                  className={cn(
+                    "w-full justify-start transition-all duration-200 mb-1",
+                    location.pathname === route.href 
+                        ? "bg-primary/10 text-primary font-bold border-r-4 border-primary rounded-r-none dark:text-primary dark:bg-primary/20" 
+                        : "hover:bg-muted text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <route.icon className={cn("mr-3 h-4 w-4", location.pathname === route.href ? "text-primary" : "text-muted-foreground")} />
+                  {route.label}
+                </Button>
+              </Link>
+            ))}
           </div>
+        </div>
         )}
         
         {/* Footer / User Profile */}
         <div className="p-4 border-t border-border/50 bg-muted/10">
           {!isNovoUser && (
-            <div className="flex justify-between items-center mb-4 px-2">
-              <span className="text-xs font-semibold text-muted-foreground">Tema</span>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleTheme}>
-                <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-                <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-              </Button>
-            </div>
+          <div className="flex justify-between items-center mb-4 px-2">
+            <span className="text-xs font-semibold text-muted-foreground">Tema</span>
+            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={toggleTheme}>
+              <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+              <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+            </Button>
+          </div>
           )}
 
           <div className="space-y-1 mb-4">
             {!isNovoUser && (
-              <Link to="/profile" onClick={onClose}>
-                <Button variant={location.pathname === "/profile" ? "secondary" : "ghost"} className="w-full justify-start h-9">
-                  <User className="mr-2 h-4 w-4" />
-                  Perfil
-                </Button>
-              </Link>
+            <Link to="/profile" onClick={onClose}>
+              <Button variant={location.pathname === "/profile" ? "secondary" : "ghost"} className="w-full justify-start h-9">
+                <User className="mr-2 h-4 w-4" />
+                Perfil
+              </Button>
+            </Link>
             )}
             <Button variant="ghost" className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10 h-9" onClick={logout}>
               <LogOut className="mr-2 h-4 w-4" />

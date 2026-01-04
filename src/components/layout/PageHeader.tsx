@@ -49,16 +49,16 @@ export function PageHeader({ title, description }: PageHeaderProps) {
     >
       <div className="flex items-start justify-between">
         <div className="flex-1">
-          <h1 className={`text-3xl font-bold tracking-tight mb-2 ${
-            isDark ? 'text-blue-100' : 'text-green-900'
-          }`}>
-            {title}
-          </h1>
-          <p className={`text-sm ${
-            isDark ? 'text-blue-200/80' : 'text-green-800/80'
-          }`}>
-            {description}
-          </p>
+      <h1 className={`text-3xl font-bold tracking-tight mb-2 ${
+        isDark ? 'text-blue-100' : 'text-green-900'
+      }`}>
+        {title}
+      </h1>
+      <p className={`text-sm ${
+        isDark ? 'text-blue-200/80' : 'text-green-800/80'
+      }`}>
+        {description}
+      </p>
         </div>
         <div className={`text-right ml-4 ${
           isDark ? 'text-blue-200' : 'text-green-800'

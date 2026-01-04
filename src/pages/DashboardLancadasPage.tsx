@@ -35,7 +35,10 @@ import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Printer } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Printer, Percent } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 // Cores padronizadas
 const COLORS_LIGHT = ['#17432a', '#17432a', '#17432a', '#17432a', '#17432a', '#17432a'];
@@ -113,6 +116,11 @@ export function DashboardLancadasPage() {
   const [devolucoesPorSetor, setDevolucoesPorSetor] = useState<any[]>([]);
   const [top20Produtos, setTop20Produtos] = useState<any[]>([]);
   const [filtroUnidadeProdutos, setFiltroUnidadeProdutos] = useState<'KG' | 'CX'>('KG');
+  const [valorVendas, setValorVendas] = useState<string>('');
+  const [motivosPorProduto, setMotivosPorProduto] = useState<any[]>([]);
+  const [motivosPorVendedor, setMotivosPorVendedor] = useState<any[]>([]);
+  const [motivosPorSetorTabela, setMotivosPorSetorTabela] = useState<any[]>([]);
+  const [motivosPorCliente, setMotivosPorCliente] = useState<any[]>([]);
 
   useEffect(() => {
     const checkTheme = () => {
@@ -220,6 +228,10 @@ export function DashboardLancadasPage() {
         setDevolucoesPorMotivo([]);
         setDevolucoesPorSetor([]);
         setTop20Produtos([]);
+        setMotivosPorProduto([]);
+        setMotivosPorVendedor([]);
+        setMotivosPorSetorTabela([]);
+        setMotivosPorCliente([]);
         setLoading(false);
         return;
     }
@@ -739,6 +751,161 @@ export function DashboardLancadasPage() {
             .sort((a, b) => b.quantidade - a.quantidade)
             .slice(0, 20);
         setTop20Produtos(produtosList);
+        
+        // Calcular tabelas - APENAS LANÇADA
+        const devolucoesLancadas = devolucoes.filter(d => d.resultado === 'LANÇADA');
+        
+        // 1. Motivos por Produto: 5 produtos mais devolvidos do top 10 maiores motivos
+        const top10Motivos = Object.entries(motivoMap)
+            .sort((a, b) => b[1].valorTotal - a[1].valorTotal)
+            .slice(0, 10)
+            .map(([name]) => name);
+        
+        const motivosPorProdutoMap: Record<string, Record<string, { quantidade: number, valorTotal: number }>> = {};
+        devolucoesLancadas.forEach((devol) => {
+            const motivoNome = devol.motivos_devolucao?.nome || 'Sem motivo';
+            if (!top10Motivos.includes(motivoNome)) return;
+            
+            const itens = devol.itens || [];
+            itens.forEach((item: any) => {
+                const produto = item.descricao || 'Desconhecido';
+                if (!motivosPorProdutoMap[produto]) {
+                    motivosPorProdutoMap[produto] = {};
+                }
+                if (!motivosPorProdutoMap[produto][motivoNome]) {
+                    motivosPorProdutoMap[produto][motivoNome] = { quantidade: 0, valorTotal: 0 };
+                }
+                motivosPorProdutoMap[produto][motivoNome].quantidade += (Number(item.quantidade) || 0);
+                motivosPorProdutoMap[produto][motivoNome].valorTotal += (Number(item.valor_total_bruto) || 0);
+            });
+        });
+        
+        // Top 5 produtos mais devolvidos
+        const top5Produtos = Object.entries(produtosMap)
+            .map(([name, data]) => ({
+                name,
+                quantidadeTotal: filtroUnidadeProdutos === 'KG' ? data.quantidadeKG : data.quantidadeCX
+            }))
+            .sort((a, b) => b.quantidadeTotal - a.quantidadeTotal)
+            .slice(0, 5)
+            .map(p => p.name);
+        
+        const motivosPorProdutoList: any[] = [];
+        top5Produtos.forEach(produto => {
+            if (motivosPorProdutoMap[produto]) {
+                const motivos = Object.entries(motivosPorProdutoMap[produto])
+                    .map(([motivo, data]: [string, any]) => ({
+                        produto,
+                        motivo,
+                        quantidade: data.quantidade,
+                        valorTotal: data.valorTotal
+                    }))
+                    .sort((a, b) => b.quantidade - a.quantidade)
+                    .slice(0, 5);
+                motivosPorProdutoList.push(...motivos);
+            }
+        });
+        setMotivosPorProduto(motivosPorProdutoList);
+        
+        // 2. Motivos por Vendedor: 5 motivos mais devolvidos por vendedor
+        const motivosPorVendedorMap: Record<string, Record<string, { quantidade: number, valorTotal: number }>> = {};
+        devolucoesLancadas.forEach((devol) => {
+            const vendedor = devol.vendedor || 'Desconhecido';
+            const motivoNome = devol.motivos_devolucao?.nome || 'Sem motivo';
+            
+            if (!motivosPorVendedorMap[vendedor]) {
+                motivosPorVendedorMap[vendedor] = {};
+            }
+            if (!motivosPorVendedorMap[vendedor][motivoNome]) {
+                motivosPorVendedorMap[vendedor][motivoNome] = { quantidade: 0, valorTotal: 0 };
+            }
+            motivosPorVendedorMap[vendedor][motivoNome].quantidade += 1;
+            motivosPorVendedorMap[vendedor][motivoNome].valorTotal += (Number(devol.valor_total_nota) || 0);
+        });
+        
+        const motivosPorVendedorList: any[] = [];
+        Object.entries(motivosPorVendedorMap).forEach(([vendedor, motivos]) => {
+            const top5Motivos = Object.entries(motivos)
+                .map(([motivo, data]: [string, any]) => ({
+                    vendedor,
+                    motivo,
+                    quantidade: data.quantidade,
+                    valorTotal: data.valorTotal
+                }))
+                .sort((a, b) => b.quantidade - a.quantidade)
+                .slice(0, 5);
+            motivosPorVendedorList.push(...top5Motivos);
+        });
+        setMotivosPorVendedor(motivosPorVendedorList);
+        
+        // 3. Motivos por Setor: top 5 motivos mais devolvidos por setor
+        const motivosPorSetorMap: Record<string, Record<string, { quantidade: number, valorTotal: number }>> = {};
+        devolucoesLancadas.forEach((devol) => {
+            const setorNome = devol.motivos_devolucao?.setores?.nome || devol.setores?.nome || 'Sem setor';
+            const motivoNome = devol.motivos_devolucao?.nome || 'Sem motivo';
+            
+            if (!motivosPorSetorMap[setorNome]) {
+                motivosPorSetorMap[setorNome] = {};
+            }
+            if (!motivosPorSetorMap[setorNome][motivoNome]) {
+                motivosPorSetorMap[setorNome][motivoNome] = { quantidade: 0, valorTotal: 0 };
+            }
+            motivosPorSetorMap[setorNome][motivoNome].quantidade += 1;
+            motivosPorSetorMap[setorNome][motivoNome].valorTotal += (Number(devol.valor_total_nota) || 0);
+        });
+        
+        const motivosPorSetorList: any[] = [];
+        Object.entries(motivosPorSetorMap).forEach(([setor, motivos]) => {
+            const top5Motivos = Object.entries(motivos)
+                .map(([motivo, data]: [string, any]) => ({
+                    setor,
+                    motivo,
+                    quantidade: data.quantidade,
+                    valorTotal: data.valorTotal
+                }))
+                .sort((a, b) => b.quantidade - a.quantidade)
+                .slice(0, 5);
+            motivosPorSetorList.push(...top5Motivos);
+        });
+        setMotivosPorSetorTabela(motivosPorSetorList);
+        
+        // 4. Motivos por Cliente: top 5 motivos mais devolvidos do top 10 clientes
+        const top10Clientes = Object.entries(customerMap)
+            .sort((a, b) => b[1].valor - a[1].valor)
+            .slice(0, 10)
+            .map(([name]) => name);
+        
+        const motivosPorClienteMap: Record<string, Record<string, { quantidade: number, valorTotal: number }>> = {};
+        devolucoesLancadas.forEach((devol) => {
+            const cliente = devol.nome_cliente || 'Desconhecido';
+            if (!top10Clientes.includes(cliente)) return;
+            
+            const motivoNome = devol.motivos_devolucao?.nome || 'Sem motivo';
+            
+            if (!motivosPorClienteMap[cliente]) {
+                motivosPorClienteMap[cliente] = {};
+            }
+            if (!motivosPorClienteMap[cliente][motivoNome]) {
+                motivosPorClienteMap[cliente][motivoNome] = { quantidade: 0, valorTotal: 0 };
+            }
+            motivosPorClienteMap[cliente][motivoNome].quantidade += 1;
+            motivosPorClienteMap[cliente][motivoNome].valorTotal += (Number(devol.valor_total_nota) || 0);
+        });
+        
+        const motivosPorClienteList: any[] = [];
+        Object.entries(motivosPorClienteMap).forEach(([cliente, motivos]) => {
+            const top5Motivos = Object.entries(motivos)
+                .map(([motivo, data]: [string, any]) => ({
+                    cliente,
+                    motivo,
+                    quantidade: data.quantidade,
+                    valorTotal: data.valorTotal
+                }))
+                .sort((a, b) => b.quantidade - a.quantidade)
+                .slice(0, 5);
+            motivosPorClienteList.push(...top5Motivos);
+        });
+        setMotivosPorCliente(motivosPorClienteList);
       }
     } catch (error: any) {
       console.error('❌ Erro ao processar dados do Dashboard Lançadas:', error);
@@ -802,205 +969,378 @@ export function DashboardLancadasPage() {
     );
   };
 
-  // Função para gerar relatório HTML do Dashboard
-  const handlePrintDashboard = () => {
-    const periodoText = filters.startDate && filters.endDate 
-      ? `${format(filters.startDate, 'dd/MM/yyyy', { locale: ptBR })} a ${format(filters.endDate, 'dd/MM/yyyy', { locale: ptBR })}`
-      : filters.period || 'Todos os períodos';
+// Função para gerar relatório HTML do Dashboard
+const handlePrintDashboard = () => {
+  const periodoText = filters.startDate && filters.endDate 
+    ? `${format(filters.startDate, 'dd/MM/yyyy', { locale: ptBR })} a ${format(filters.endDate, 'dd/MM/yyyy', { locale: ptBR })}`
+    : filters.period || 'Todos os períodos';
 
-    const htmlContent = `
+  // Construir informações de filtros selecionados
+  const filtrosSelecionados: string[] = [];
+  if (filters.motivo && filters.motivo.length > 0) {
+    filtrosSelecionados.push(`Motivos: ${filters.motivo.length} selecionado(s)`);
+  }
+  if (filters.cliente && filters.cliente.length > 0) {
+    filtrosSelecionados.push(`Clientes: ${filters.cliente.length} selecionado(s)`);
+  }
+  if (filters.vendedor && filters.vendedor.length > 0) {
+    filtrosSelecionados.push(`Vendedores: ${filters.vendedor.length} selecionado(s)`);
+  }
+  if (filters.setor && filters.setor.length > 0) {
+    filtrosSelecionados.push(`Setores: ${filters.setor.length} selecionado(s)`);
+  }
+  if (filters.search) {
+    filtrosSelecionados.push(`Busca: "${filters.search}"`);
+  }
+
+  const htmlContent = `
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dashboard Lançadas - Relatório</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-    }
-    
-    @page {
-      size: A4 landscape;
-      margin: 10mm;
-    }
-    
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Lançadas - Relatório</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  @page {
+    size: A4 portrait;
+    margin: 15mm;
+  }
+  
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: white;
+    padding: 10px;
+    color: #333;
+    font-size: 9px;
+  }
+  
+  .page {
+    page-break-after: auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .header {
+    background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%);
+    color: white;
+    padding: 12px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+  }
+  
+  .header-logo {
+    width: 50px;
+    height: 50px;
+    background: white;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  
+  .header-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  
+  .header-content {
+    flex: 1;
+  }
+  
+  .header h1 {
+    font-size: 18px;
+    margin-bottom: 4px;
+  }
+  
+  .header-info {
+    font-size: 9px;
+    opacity: 0.95;
+    margin-bottom: 3px;
+  }
+  
+  .header-filters {
+    font-size: 8px;
+    opacity: 0.85;
+    margin-top: 4px;
+  }
+  
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  
+  .kpi-card {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px;
+    background: #f9fafb;
+  }
+  
+  .kpi-title {
+    font-size: 7px;
+    color: #666;
+    margin-bottom: 3px;
+  }
+  
+  .kpi-value {
+    font-size: 13px;
+    font-weight: bold;
+    color: #073e29;
+  }
+  
+  .kpi-desc {
+    font-size: 6px;
+    color: #999;
+    margin-top: 2px;
+  }
+  
+  .chart-section {
+    margin-bottom: 10px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  
+  .chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  
+  .chart-title {
+    font-size: 11px;
+    font-weight: bold;
+    margin-bottom: 6px;
+    color: #073e29;
+    border-bottom: 2px solid #073e29;
+    padding-bottom: 3px;
+  }
+
+  .chart-container {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 6px;
+    background: white;
+    height: 140px;
+    position: relative;
+    width: 100%;
+  }
+  
+  .insights-container {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 6px;
+    background: white;
+    height: 140px;
+    position: relative;
+    width: 100%;
+    overflow-y: auto;
+  }
+  
+  .insight-item {
+    font-size: 8px;
+    margin-bottom: 4px;
+    padding-left: 6px;
+    line-height: 1.4;
+    color: #333;
+  }
+  
+  .devolucao-vendas-card {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 10px;
+    background: #f9fafb;
+    margin-bottom: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .devolucao-vendas-title {
+    font-size: 11px;
+    font-weight: bold;
+    color: #073e29;
+    margin-bottom: 4px;
+  }
+  
+  .devolucao-vendas-content {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+  }
+  
+  .devolucao-vendas-input {
+    flex: 1;
+  }
+  
+  .devolucao-vendas-input label {
+    font-size: 8px;
+    color: #666;
+    display: block;
+    margin-bottom: 4px;
+  }
+  
+  .devolucao-vendas-input input {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 10px;
+  }
+  
+  .devolucao-vendas-result {
+    flex: 1;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px;
+    background: white;
+  }
+  
+  .devolucao-vendas-result-title {
+    font-size: 7px;
+    color: #666;
+    margin-bottom: 3px;
+  }
+  
+  .devolucao-vendas-result-value {
+    font-size: 16px;
+    font-weight: bold;
+    color: #073e29;
+  }
+  
+  .devolucao-vendas-result-desc {
+    font-size: 6px;
+    color: #999;
+    margin-top: 2px;
+  }
+  
+  .tables-section {
+    margin-top: 12px;
+    margin-bottom: 12px;
+  }
+  
+  .tables-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  
+  .table-card {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px;
+    background: white;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  
+  .table-title {
+    font-size: 10px;
+    font-weight: bold;
+    color: #073e29;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #073e29;
+    padding-bottom: 3px;
+  }
+  
+  .table-description {
+    font-size: 7px;
+    color: #666;
+    margin-bottom: 6px;
+  }
+  
+  .table-container {
+    overflow-x: auto;
+  }
+  
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 7px;
+  }
+  
+  table th {
+    background: #f9fafb;
+    border: 1px solid #ddd;
+    padding: 4px;
+    text-align: left;
+    font-weight: bold;
+    color: #073e29;
+  }
+  
+  table td {
+    border: 1px solid #ddd;
+    padding: 4px;
+    color: #333;
+  }
+  
+  table tr:nth-child(even) {
+    background: #f9fafb;
+  }
+  
+  .text-right {
+    text-align: right;
+  }
+  
+  .footer {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 2px solid #073e29;
+    text-align: center;
+    font-size: 7px;
+    color: #666;
+  }
+  
+  @media print {
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: white;
-      padding: 20px;
-      color: #333;
-      font-size: 10px;
+      padding: 0;
     }
-    
-    .header {
-      background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%);
-      color: white;
-      padding: 20px;
-      border-radius: 8px;
-      margin-bottom: 20px;
-      text-align: center;
+    .no-print {
+      display: none !important;
     }
-    
-    .header h1 {
-      font-size: 24px;
-      margin-bottom: 5px;
-    }
-    
-    .header p {
-      font-size: 12px;
-      opacity: 0.9;
-    }
-    
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(6, 1fr);
-      gap: 10px;
-      margin-bottom: 20px;
-    }
-    
-    .kpi-card {
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 15px;
-      background: #f9fafb;
-    }
-    
-    .kpi-title {
-      font-size: 9px;
-      color: #666;
-      margin-bottom: 5px;
-    }
-    
-    .kpi-value {
-      font-size: 18px;
-      font-weight: bold;
-      color: #073e29;
-    }
-    
-    .kpi-desc {
-      font-size: 8px;
-      color: #999;
-      margin-top: 5px;
-    }
-    
-    .chart-section {
-      margin-bottom: 30px;
+    .chart-container, .chart-container-full {
       page-break-inside: avoid;
     }
-    
-    .chart-title {
-      font-size: 14px;
-      font-weight: bold;
-      margin-bottom: 10px;
-      color: #073e29;
-      border-bottom: 2px solid #073e29;
-      padding-bottom: 5px;
-    }
-    
-    .chart-container {
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 15px;
-      background: white;
-      min-height: 200px;
-    }
-    
-    .insights-section {
-      margin-top: 20px;
-      padding: 15px;
-      background: #f0f9ff;
-      border-left: 4px solid #073e29;
-      border-radius: 4px;
-    }
-    
-    .insights-title {
-      font-size: 12px;
-      font-weight: bold;
-      margin-bottom: 10px;
-      color: #073e29;
-    }
-    
-    .insight-item {
-      font-size: 10px;
-      margin-bottom: 5px;
-      padding-left: 10px;
-    }
-    
-    .table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 10px;
-      font-size: 9px;
-    }
-    
-    .table th, .table td {
-      border: 1px solid #ddd;
-      padding: 6px;
-      text-align: left;
-    }
-    
-    .table th {
-      background: #073e29;
-      color: white;
-      font-weight: bold;
-    }
-    
-    .table tr:nth-child(even) {
-      background: #f9fafb;
-    }
-    
-    .municipio-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 20px;
-      margin-top: 10px;
-    }
-    
-    .municipio-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px;
-      border-bottom: 1px solid #eee;
-    }
-    
-    .municipio-name {
-      font-weight: 500;
-    }
-    
-    .municipio-percent {
-      color: #666;
-      font-size: 9px;
-    }
-    
-    @media print {
-      body {
-        padding: 0;
-      }
-      .no-print {
-        display: none;
-      }
-    }
-  </style>
+  }
+</style>
 </head>
 <body>
-  <div class="no-print" style="position: fixed; top: 10px; right: 10px; z-index: 1000;">
-    <button onclick="window.print()" style="background: #073e29; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold;">
-      🖨️ Imprimir
-    </button>
-  </div>
-  
+<button class="no-print" onclick="window.print()" style="position: fixed; top: 10px; right: 10px; z-index: 1000; background: #073e29; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold;">
+  🖨️ Imprimir
+</button>
+
+<!-- PÁGINA 1: Header + KPIs + 3 Seções com 2 Gráficos -->
+<div class="page">
   <div class="header">
-    <h1>Dashboard Lançadas</h1>
-    <p>Relatório Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} | Período: ${periodoText}</p>
+    <div class="header-logo">
+      <img src="/logo.png" alt="Logo" onerror="this.style.display='none'" style="background-color: #073e29;">
+    </div>
+    <div class="header-content">
+      <h1>Dashboard Lançadas</h1>
+      <div class="header-info">Relatório Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</div>
+      <div class="header-info">Período: ${periodoText}</div>
+      ${filtrosSelecionados.length > 0 ? `<div class="header-filters">Filtros: ${filtrosSelecionados.join(' | ')}</div>` : ''}
+    </div>
   </div>
   
-  <!-- KPI Cards -->
   <div class="kpi-grid">
     <div class="kpi-card">
       <div class="kpi-title">Valor Total Devolvido</div>
@@ -1033,138 +1373,758 @@ export function DashboardLancadasPage() {
     </div>
   </div>
   
-  <!-- Gráfico: Devoluções Por Motivo -->
-  ${devolucoesPorMotivo.length > 0 ? `
-  <div class="chart-section">
-    <div class="chart-title">Devoluções Por Motivo (Apenas LANÇADA)</div>
-    <div class="chart-container">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Motivo</th>
-            <th>Valor Total</th>
-            <th>Quantidade de Notas</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${devolucoesPorMotivo.map((item: any) => `
-            <tr>
-              <td>${item.name}</td>
-              <td>R$ ${item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td>${item.quantidade}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  ` : ''}
-  
-  <!-- Gráfico: Devoluções Por Setores -->
-  ${devolucoesPorSetor.length > 0 ? `
-  <div class="chart-section">
-    <div class="chart-title">Devoluções Por Setores (Apenas LANÇADA)</div>
-    <div class="chart-container">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Setor</th>
-            <th>Valor Total</th>
-            <th>Quantidade de Notas</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${devolucoesPorSetor.map((item: any) => `
-            <tr>
-              <td>${item.name}</td>
-              <td>R$ ${item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-              <td>${item.quantidade}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  ` : ''}
-  
-  <!-- Top 20 Produtos -->
-  ${top20Produtos.length > 0 ? `
-  <div class="chart-section">
-    <div class="chart-title">Top 20 Produtos mais devolvidos (${filtroUnidadeProdutos})</div>
-    <div class="chart-container">
-      <table class="table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Produto</th>
-            <th>Quantidade (${filtroUnidadeProdutos})</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${top20Produtos.map((item: any, index: number) => `
-            <tr>
-              <td>${index + 1}º</td>
-              <td>${item.nameFull || item.name}</td>
-              <td>${item.quantidade.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-  </div>
-  ` : ''}
-  
-  <!-- Distribuição por Município -->
-  ${municipioData.length > 0 ? `
-  <div class="chart-section">
-    <div class="chart-title">Distribuição por Município</div>
-    <div class="chart-container">
-      <div class="municipio-grid">
-        <div>
-          ${municipioData.slice(0, 10).map((municipio: any) => `
-            <div class="municipio-item">
-              <span class="municipio-name">${municipio.name}</span>
-              <span class="municipio-percent">${((municipio.value / (stats.totalValue || 1)) * 100).toFixed(0)}%</span>
-            </div>
-          `).join('')}
+  <!-- Card Devolução sobre Vendas -->
+  <div class="devolucao-vendas-card">
+    <div class="devolucao-vendas-title">Devolução sobre Vendas</div>
+    <div class="devolucao-vendas-content">
+      <div class="devolucao-vendas-input">
+        <label>Valor de Vendas (R$)</label>
+        <input type="number" id="valorVendasInput" value="${valorVendas || ''}" readonly style="background: #f0f0f0; cursor: not-allowed;" />
+      </div>
+      <div class="devolucao-vendas-result">
+        <div class="devolucao-vendas-result-title">Devolução sobre Vendas</div>
+        <div class="devolucao-vendas-result-value">
+          ${valorVendas && Number(valorVendas) > 0 
+            ? `${((stats.valorTotalLancado / Number(valorVendas)) * 100).toFixed(2)}%`
+            : '0.00%'}
         </div>
-        <div>
-          ${municipioData.slice(10, 20).map((municipio: any) => `
-            <div class="municipio-item">
-              <span class="municipio-name">${municipio.name}</span>
-              <span class="municipio-percent">${((municipio.value / (stats.totalValue || 1)) * 100).toFixed(0)}%</span>
-            </div>
-          `).join('')}
+        <div class="devolucao-vendas-result-desc">Resultado: LANÇADA</div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Seção 1: Evolução no Tempo | Top Clientes -->
+  <div class="chart-grid">
+    <div class="chart-section">
+      <div class="chart-title">Evolução no Tempo</div>
+      <div class="chart-container">
+        <canvas id="chartEvolucao"></canvas>
+      </div>
+    </div>
+    <div class="chart-section">
+      <div class="chart-title">Top Clientes (Valor)</div>
+      <div class="chart-container">
+        <canvas id="chartTopClientes"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Seção 2: Top Vendedores | Top Redes -->
+  <div class="chart-grid">
+    <div class="chart-section">
+      <div class="chart-title">Top Vendedores (Valor)</div>
+      <div class="chart-container">
+        <canvas id="chartVendedores"></canvas>
+      </div>
+    </div>
+    <div class="chart-section">
+      <div class="chart-title">Top Redes (Valor)</div>
+      <div class="chart-container">
+        <canvas id="chartRedes"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Seção 3: Análise de Pareto | Clientes com Reincidência -->
+  <div class="chart-grid">
+    <div class="chart-section">
+      <div class="chart-title">Análise de Pareto (80/20)</div>
+      <div class="chart-container">
+        <canvas id="chartPareto"></canvas>
+      </div>
+    </div>
+    <div class="chart-section">
+      <div class="chart-title">Clientes com Reincidência</div>
+      <div class="chart-container">
+        <canvas id="chartReincidencia"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Seção 4: Devoluções Por Motivo | Devoluções Por Setores -->
+  <div class="chart-grid">
+    <div class="chart-section">
+      <div class="chart-title">Devoluções Por Motivo (Apenas LANÇADA)</div>
+      <div class="chart-container">
+        <canvas id="chartMotivos"></canvas>
+      </div>
+    </div>
+    <div class="chart-section">
+      <div class="chart-title">Devoluções Por Setores (Apenas LANÇADA)</div>
+      <div class="chart-container">
+        <canvas id="chartSetores"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Seção 5: Top 20 Produtos | Insights -->
+  <div class="chart-grid">
+    <div class="chart-section">
+      <div class="chart-title">Top 20 Produtos mais devolvidos (${filtroUnidadeProdutos})</div>
+      <div class="chart-container">
+        <canvas id="chartProdutos"></canvas>
+      </div>
+    </div>
+    ${insights.length > 0 ? `
+    <div class="chart-section">
+      <div class="chart-title">Insights Automáticos</div>
+      <div class="insights-container">
+        ${insights.map((insight: string) => `
+          <div class="insight-item">${insight}</div>
+        `).join('')}
+      </div>
+    </div>
+    ` : '<div class="chart-section"></div>'}
+  </div>
+  
+  <!-- Tabelas de Motivos -->
+  <div class="tables-section">
+    <div class="tables-grid">
+      <!-- Tabela 1: Motivos por Produto -->
+      <div class="table-card">
+        <div class="table-title">Motivos por Produto</div>
+        <div class="table-description">5 produtos mais devolvidos do top 10 maiores motivos (Apenas LANÇADA)</div>
+        <div class="table-container">
+          ${motivosPorProduto.length > 0 ? `
+          <table>
+            <thead>
+              <tr>
+                <th>Produto</th>
+                <th>Motivo</th>
+                <th class="text-right">Qtd</th>
+                <th class="text-right">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${motivosPorProduto.map((item: any) => `
+                <tr>
+                  <td>${(item.produto || '').length > 20 ? (item.produto || '').substring(0, 20) + '...' : (item.produto || '')}</td>
+                  <td>${(item.motivo || '').length > 20 ? (item.motivo || '').substring(0, 20) + '...' : (item.motivo || '')}</td>
+                  <td class="text-right">${(item.quantidade || 0).toFixed(2)}</td>
+                  <td class="text-right">R$ ${(item.valorTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : '<p style="text-align: center; color: #999; font-size: 8px; padding: 10px;">Nenhum dado disponível</p>'}
+        </div>
+      </div>
+      
+      <!-- Tabela 2: Motivos por Vendedor -->
+      <div class="table-card">
+        <div class="table-title">Motivos por Vendedor</div>
+        <div class="table-description">5 motivos mais devolvidos por vendedor (Apenas LANÇADA)</div>
+        <div class="table-container">
+          ${motivosPorVendedor.length > 0 ? `
+          <table>
+            <thead>
+              <tr>
+                <th>Vendedor</th>
+                <th>Motivo</th>
+                <th class="text-right">Qtd</th>
+                <th class="text-right">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${motivosPorVendedor.map((item: any) => `
+                <tr>
+                  <td>${(item.vendedor || '').length > 15 ? (item.vendedor || '').substring(0, 15) + '...' : (item.vendedor || '')}</td>
+                  <td>${(item.motivo || '').length > 20 ? (item.motivo || '').substring(0, 20) + '...' : (item.motivo || '')}</td>
+                  <td class="text-right">${item.quantidade || 0}</td>
+                  <td class="text-right">R$ ${(item.valorTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : '<p style="text-align: center; color: #999; font-size: 8px; padding: 10px;">Nenhum dado disponível</p>'}
+        </div>
+      </div>
+      
+      <!-- Tabela 3: Motivos por Setor -->
+      <div class="table-card">
+        <div class="table-title">Motivos por Setor</div>
+        <div class="table-description">Top 5 motivos mais devolvidos por setor (Apenas LANÇADA)</div>
+        <div class="table-container">
+          ${motivosPorSetorTabela.length > 0 ? `
+          <table>
+            <thead>
+              <tr>
+                <th>Setor</th>
+                <th>Motivo</th>
+                <th class="text-right">Qtd</th>
+                <th class="text-right">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${motivosPorSetorTabela.map((item: any) => `
+                <tr>
+                  <td>${item.setor || ''}</td>
+                  <td>${(item.motivo || '').length > 20 ? (item.motivo || '').substring(0, 20) + '...' : (item.motivo || '')}</td>
+                  <td class="text-right">${item.quantidade || 0}</td>
+                  <td class="text-right">R$ ${(item.valorTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : '<p style="text-align: center; color: #999; font-size: 8px; padding: 10px;">Nenhum dado disponível</p>'}
+        </div>
+      </div>
+      
+      <!-- Tabela 4: Motivos por Cliente -->
+      <div class="table-card">
+        <div class="table-title">Motivos por Cliente</div>
+        <div class="table-description">Top 5 motivos mais devolvidos do top 10 clientes (Apenas LANÇADA)</div>
+        <div class="table-container">
+          ${motivosPorCliente.length > 0 ? `
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>Motivo</th>
+                <th class="text-right">Qtd</th>
+                <th class="text-right">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${motivosPorCliente.map((item: any) => `
+                <tr>
+                  <td>${(item.cliente || '').length > 20 ? (item.cliente || '').substring(0, 20) + '...' : (item.cliente || '')}</td>
+                  <td>${(item.motivo || '').length > 20 ? (item.motivo || '').substring(0, 20) + '...' : (item.motivo || '')}</td>
+                  <td class="text-right">${item.quantidade || 0}</td>
+                  <td class="text-right">R$ ${(item.valorTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ` : '<p style="text-align: center; color: #999; font-size: 8px; padding: 10px;">Nenhum dado disponível</p>'}
         </div>
       </div>
     </div>
   </div>
-  ` : ''}
   
-  <!-- Insights -->
-  ${insights.length > 0 ? `
-  <div class="insights-section">
-    <div class="insights-title">Insights Automáticos</div>
-    ${insights.map((insight: string) => `
-      <div class="insight-item">${insight}</div>
-    `).join('')}
-  </div>
-  ` : ''}
-  
-  <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #073e29; text-align: center; font-size: 9px; color: #666;">
+  <div class="footer">
     <p>Relatório gerado automaticamente pelo Sistema de Devoluções - Grupo Doce Mel</p>
     <p>Data de geração: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}</p>
   </div>
+</div>
+
+<script>
+  Chart.defaults.font.size = 8;
+  Chart.defaults.color = '#1f2937';
+  Chart.defaults.borderColor = '#e5e7eb';
+  
+  // Gráfico de Evolução no Tempo
+  new Chart(document.getElementById('chartEvolucao'), {
+    type: 'line',
+    data: {
+      labels: ${JSON.stringify(chartData.map((d: any) => d.name))},
+      datasets: [{
+        label: 'Valor Total (R$)',
+        data: ${JSON.stringify(chartData.map((d: any) => d.value))},
+        borderColor: '#17432a',
+        backgroundColor: 'rgba(23, 67, 42, 0.15)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#17432a',
+          borderWidth: 1,
+          callbacks: {
+            label: (context) => 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 },
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR')
+          },
+          grid: { color: '#e5e7eb' }
+        },
+        x: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 }
+          },
+          grid: { color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+  
+  // Gráfico Top Clientes
+  new Chart(document.getElementById('chartTopClientes'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(topCustomers.map((d: any) => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name))},
+      datasets: [{
+        label: 'Valor (R$)',
+        data: ${JSON.stringify(topCustomers.map((d: any) => d.value))},
+        backgroundColor: '#17432a',
+        borderColor: '#0a4d33',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      indexAxis: 'y',
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#17432a',
+          borderWidth: 1,
+          callbacks: {
+            label: (context) => 'R$ ' + context.parsed.x.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 },
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR')
+          },
+          grid: { color: '#e5e7eb' }
+        },
+        y: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 }
+          },
+          grid: { color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+  
+  // Gráfico Top Vendedores
+  new Chart(document.getElementById('chartVendedores'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(topVendedores.map((d: any) => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name))},
+      datasets: [{
+        label: 'Valor (R$)',
+        data: ${JSON.stringify(topVendedores.map((d: any) => d.value))},
+        backgroundColor: '#0a4d33',
+        borderColor: '#17432a',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#0a4d33',
+          borderWidth: 1,
+          callbacks: {
+            label: (context) => 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 },
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR')
+          },
+          grid: { color: '#e5e7eb' }
+        },
+        x: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 }
+          },
+          grid: { color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+  
+  // Gráfico Top Redes
+  new Chart(document.getElementById('chartRedes'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(topRedes.map((d: any) => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name))},
+      datasets: [{
+        label: 'Valor (R$)',
+        data: ${JSON.stringify(topRedes.map((d: any) => d.value))},
+        backgroundColor: '#065f46',
+        borderColor: '#0a4d33',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#065f46',
+          borderWidth: 1,
+          callbacks: {
+            label: (context) => 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 },
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR')
+          },
+          grid: { color: '#e5e7eb' }
+        },
+        x: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 }
+          },
+          grid: { color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+  
+  // Gráfico Pareto
+  new Chart(document.getElementById('chartPareto'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(paretoData.map((d: any) => d.name.length > 10 ? d.name.substring(0, 10) + '...' : d.name))},
+      datasets: [{
+        type: 'bar',
+        label: 'Valor (R$)',
+        data: ${JSON.stringify(paretoData.map((d: any) => d.value))},
+        backgroundColor: '#17432a',
+        borderColor: '#0a4d33',
+        borderWidth: 1,
+        yAxisID: 'y'
+      }, {
+        type: 'line',
+        label: '% Acumulado',
+        data: ${JSON.stringify(paretoData.map((d: any) => d.percentage))},
+        borderColor: '#dc2626',
+        backgroundColor: 'rgba(220, 38, 38, 0.1)',
+        borderWidth: 2,
+        yAxisID: 'y1',
+        pointRadius: 3,
+        pointBackgroundColor: '#dc2626'
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#17432a',
+          borderWidth: 1
+        }
+      },
+      scales: {
+        y: {
+          type: 'linear',
+          display: true,
+          position: 'left',
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 },
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR')
+          },
+          grid: { color: '#e5e7eb' }
+        },
+        y1: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          max: 100,
+          ticks: {
+            color: '#dc2626',
+            font: { size: 8 },
+            callback: (value) => value + '%'
+          },
+          grid: {
+            drawOnChartArea: false,
+          }
+        },
+        x: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 }
+          },
+          grid: { color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+  
+  // Gráfico Reincidência
+  new Chart(document.getElementById('chartReincidencia'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(clientesReincidencia.map((d: any) => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name))},
+      datasets: [{
+        label: 'Notas Canceladas',
+        data: ${JSON.stringify(clientesReincidencia.map((d: any) => d.count))},
+        backgroundColor: '#dc2626',
+        borderColor: '#b91c1c',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#dc2626',
+          borderWidth: 1
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 },
+            stepSize: 1
+          },
+          grid: { color: '#e5e7eb' }
+        },
+        x: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 }
+          },
+          grid: { color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+  
+  // Gráfico Motivos (Colunas Verticais)
+  new Chart(document.getElementById('chartMotivos'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(devolucoesPorMotivo.map((d: any) => d.name.length > 20 ? d.name.substring(0, 20) + '...' : d.name))},
+      datasets: [{
+        label: 'Valor Total (R$)',
+        data: ${JSON.stringify(devolucoesPorMotivo.map((d: any) => d.valorTotal))},
+        backgroundColor: '#17432a',
+        borderColor: '#0a4d33',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      indexAxis: 'x',
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#17432a',
+          borderWidth: 1,
+          callbacks: {
+            label: (context) => {
+              const dataIndex = context.dataIndex;
+              const quantidade = ${JSON.stringify(devolucoesPorMotivo.map((d: any) => d.quantidade))}[dataIndex];
+              return [
+                'Valor: R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                'Quantidade: ' + quantidade + ' nota(s)'
+              ];
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 },
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR')
+          },
+          grid: { color: '#e5e7eb' }
+        },
+        x: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 7 },
+            maxRotation: 45,
+            minRotation: 45
+          },
+          grid: { color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+  
+  // Gráfico Setores (Colunas Verticais)
+  new Chart(document.getElementById('chartSetores'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(devolucoesPorSetor.map((d: any) => d.name))},
+      datasets: [{
+        label: 'Valor Total (R$)',
+        data: ${JSON.stringify(devolucoesPorSetor.map((d: any) => d.valorTotal))},
+        backgroundColor: '#0a4d33',
+        borderColor: '#17432a',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      indexAxis: 'x',
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#0a4d33',
+          borderWidth: 1,
+          callbacks: {
+            label: (context) => {
+              const dataIndex = context.dataIndex;
+              const quantidade = ${JSON.stringify(devolucoesPorSetor.map((d: any) => d.quantidade))}[dataIndex];
+              return [
+                'Valor: R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                'Quantidade: ' + quantidade + ' nota(s)'
+              ];
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 },
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR')
+          },
+          grid: { color: '#e5e7eb' }
+        },
+        x: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 }
+          },
+          grid: { color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+  
+  // Gráfico Produtos (Colunas Verticais)
+  new Chart(document.getElementById('chartProdutos'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(top20Produtos.map((d: any) => (d.nameFull || d.name).length > 15 ? (d.nameFull || d.name).substring(0, 15) + '...' : (d.nameFull || d.name)))},
+      datasets: [{
+        label: 'Quantidade (${filtroUnidadeProdutos})',
+        data: ${JSON.stringify(top20Produtos.map((d: any) => d.quantidade))},
+        backgroundColor: '#065f46',
+        borderColor: '#0a4d33',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: false,
+      maintainAspectRatio: false,
+      indexAxis: 'x',
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          titleColor: '#fff',
+          bodyColor: '#fff',
+          borderColor: '#065f46',
+          borderWidth: 1,
+          callbacks: {
+            title: (items) => {
+              const index = items[0].dataIndex;
+              return ${JSON.stringify(top20Produtos.map((d: any) => d.nameFull || d.name))}[index] || '';
+            },
+            label: (context) => context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ${filtroUnidadeProdutos}'
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: '#1f2937',
+            font: { size: 8 }
+          },
+          grid: { color: '#e5e7eb' }
+        },
+        x: {
+          ticks: {
+            color: '#1f2937',
+            font: { size: 7 },
+            maxRotation: 45,
+            minRotation: 45
+          },
+          grid: { color: '#e5e7eb' }
+        }
+      }
+    }
+  });
+</script>
 </body>
 </html>
-    `;
-    
-    const newWindow = window.open('', '_blank');
-    if (newWindow) {
-      newWindow.document.write(htmlContent);
-      newWindow.document.close();
-    }
-  };
+  `;
+  
+  const newWindow = window.open('', '_blank');
+  if (newWindow) {
+    newWindow.document.write(htmlContent);
+    newWindow.document.close();
+  }
+};
 
   // CustomTooltip para gráficos de Motivo, Setores e Produtos (mostra valor e quantidade)
   const CustomTooltipDetalhado = ({ active, payload }: any) => {
@@ -1267,6 +2227,39 @@ export function DashboardLancadasPage() {
           icon={TrendingUp}
         />
       </div>
+
+      {/* Card Devolução sobre Vendas */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Devolução sobre Vendas</CardTitle>
+          <CardDescription>Calcule o percentual de devoluções sobre o valor de vendas</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col md:flex-row gap-4 items-end">
+            <div className="flex-1">
+              <Label htmlFor="valorVendas">Valor de Vendas (R$)</Label>
+              <Input
+                id="valorVendas"
+                type="number"
+                placeholder="Digite o valor de vendas"
+                value={valorVendas}
+                onChange={(e) => setValorVendas(e.target.value)}
+                className="mt-2"
+              />
+            </div>
+            <div className="flex-1">
+              <KPICard
+                title="Devolução sobre Vendas"
+                value={valorVendas && Number(valorVendas) > 0 
+                  ? `${((stats.valorTotalLancado / Number(valorVendas)) * 100).toFixed(2)}%`
+                  : '0.00%'}
+                icon={Percent}
+                description="Resultado: LANÇADA"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Main Charts Row */}
       <div className="grid gap-4 md:grid-cols-2">
@@ -1818,6 +2811,161 @@ export function DashboardLancadasPage() {
                   )}
               </CardContent>
           </Card>
+
+      {/* Tabelas de Motivos */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Tabela 1: Motivos por Produto */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Motivos por Produto</CardTitle>
+            <CardDescription>5 produtos mais devolvidos do top 10 maiores motivos (Apenas LANÇADA)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {motivosPorProduto.length > 0 ? (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[10px]">Produto</TableHead>
+                      <TableHead className="text-[10px]">Motivo</TableHead>
+                      <TableHead className="text-[10px] text-right">Qtd</TableHead>
+                      <TableHead className="text-[10px] text-right">Valor</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {motivosPorProduto.map((item: any, index: number) => (
+                      <TableRow key={index}>
+                        <TableCell className="text-[10px] font-medium">{item.produto.length > 20 ? item.produto.substring(0, 20) + '...' : item.produto}</TableCell>
+                        <TableCell className="text-[10px]">{item.motivo.length > 20 ? item.motivo.substring(0, 20) + '...' : item.motivo}</TableCell>
+                        <TableCell className="text-[10px] text-right">{item.quantidade.toFixed(2)}</TableCell>
+                        <TableCell className="text-[10px] text-right">R$ {item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center text-sm text-muted-foreground py-8">
+                Nenhum dado disponível
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Tabela 2: Motivos por Vendedor */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Motivos por Vendedor</CardTitle>
+            <CardDescription>5 motivos mais devolvidos por vendedor (Apenas LANÇADA)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {motivosPorVendedor.length > 0 ? (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[10px]">Vendedor</TableHead>
+                      <TableHead className="text-[10px]">Motivo</TableHead>
+                      <TableHead className="text-[10px] text-right">Qtd</TableHead>
+                      <TableHead className="text-[10px] text-right">Valor</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {motivosPorVendedor.map((item: any, index: number) => (
+                      <TableRow key={index}>
+                        <TableCell className="text-[10px] font-medium">{item.vendedor.length > 15 ? item.vendedor.substring(0, 15) + '...' : item.vendedor}</TableCell>
+                        <TableCell className="text-[10px]">{item.motivo.length > 20 ? item.motivo.substring(0, 20) + '...' : item.motivo}</TableCell>
+                        <TableCell className="text-[10px] text-right">{item.quantidade}</TableCell>
+                        <TableCell className="text-[10px] text-right">R$ {item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center text-sm text-muted-foreground py-8">
+                Nenhum dado disponível
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Tabela 3: Motivos por Setor */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Motivos por Setor</CardTitle>
+            <CardDescription>Top 5 motivos mais devolvidos por setor (Apenas LANÇADA)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {motivosPorSetorTabela.length > 0 ? (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[10px]">Setor</TableHead>
+                      <TableHead className="text-[10px]">Motivo</TableHead>
+                      <TableHead className="text-[10px] text-right">Qtd</TableHead>
+                      <TableHead className="text-[10px] text-right">Valor</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {motivosPorSetorTabela.map((item: any, index: number) => (
+                      <TableRow key={index}>
+                        <TableCell className="text-[10px] font-medium">{item.setor}</TableCell>
+                        <TableCell className="text-[10px]">{item.motivo.length > 20 ? item.motivo.substring(0, 20) + '...' : item.motivo}</TableCell>
+                        <TableCell className="text-[10px] text-right">{item.quantidade}</TableCell>
+                        <TableCell className="text-[10px] text-right">R$ {item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center text-sm text-muted-foreground py-8">
+                Nenhum dado disponível
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Tabela 4: Motivos por Cliente */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Motivos por Cliente</CardTitle>
+            <CardDescription>Top 5 motivos mais devolvidos do top 10 clientes (Apenas LANÇADA)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {motivosPorCliente.length > 0 ? (
+              <div className="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-[10px]">Cliente</TableHead>
+                      <TableHead className="text-[10px]">Motivo</TableHead>
+                      <TableHead className="text-[10px] text-right">Qtd</TableHead>
+                      <TableHead className="text-[10px] text-right">Valor</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {motivosPorCliente.map((item: any, index: number) => (
+                      <TableRow key={index}>
+                        <TableCell className="text-[10px] font-medium">{item.cliente.length > 20 ? item.cliente.substring(0, 20) + '...' : item.cliente}</TableCell>
+                        <TableCell className="text-[10px]">{item.motivo.length > 20 ? item.motivo.substring(0, 20) + '...' : item.motivo}</TableCell>
+                        <TableCell className="text-[10px] text-right">{item.quantidade}</TableCell>
+                        <TableCell className="text-[10px] text-right">R$ {item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center text-sm text-muted-foreground py-8">
+                Nenhum dado disponível
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

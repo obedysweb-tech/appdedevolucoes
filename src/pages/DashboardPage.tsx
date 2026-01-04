@@ -448,7 +448,7 @@ export function DashboardPage() {
             const reason = (typeof motivo === 'object' && motivo?.nome) ? motivo.nome : (typeof motivo === 'string' ? motivo : null);
             // Ignorar motivos nulos ou "Não informado"
             if (reason && reason !== 'Não informado' && reason !== 'não informado' && reason !== 'NÃO INFORMADO') {
-                acc[reason] = (acc[reason] || 0) + 1;
+            acc[reason] = (acc[reason] || 0) + 1;
             }
             return acc;
         }, {});
@@ -770,8 +770,8 @@ export function DashboardPage() {
         const notasAtraso = devolucoes.filter(d => d.prazo === 'EM ATRASO');
         if (notasAtraso.length > 0) {
             const valorTotal = notasAtraso.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
-            alertsList.push({
-                type: 'warning',
+                    alertsList.push({
+                        type: 'warning',
                 message: `${notasAtraso.length} nota(s) em atraso`,
                 count: notasAtraso.length,
                 total: notasAtraso.length,
@@ -821,7 +821,7 @@ export function DashboardPage() {
             const cliente = devol.nome_cliente || 'Desconhecido';
             if (!clientesPendentes[cliente]) {
                 clientesPendentes[cliente] = [];
-            }
+                }
             clientesPendentes[cliente].push(devol);
         });
         
@@ -1239,7 +1239,7 @@ export function DashboardPage() {
       {/* Alertas e Velocímetro */}
       <div className="grid gap-4 md:grid-cols-2">
         {/* Alertas - Novo componente */}
-        {alerts.length > 0 && (
+      {alerts.length > 0 && (
           <div className="bg-white dark:bg-gray-900 rounded-xl border-2 border-gray-200 dark:border-gray-700 shadow-lg">
             {/* Header */}
             <div className="bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-900 p-6 border-b-2 border-gray-200 dark:border-gray-700">
@@ -1247,7 +1247,7 @@ export function DashboardPage() {
                 <div className="flex items-center gap-3">
                   <div className="bg-gradient-to-br from-orange-500 to-red-500 rounded-xl p-3 shadow-lg">
                     <AlertTriangle className="h-6 w-6 text-white" />
-                  </div>
+                </div>
                   <div>
                     <h3 className="text-lg font-bold text-gray-800 dark:text-gray-200">Central de Alertas</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400">Monitoramento de devoluções e pendências</p>
@@ -1283,8 +1283,8 @@ export function DashboardPage() {
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                 {alerts.map((alert, idx) => (
                   <AlertCard key={idx} alert={alert} />
-                ))}
-              </div>
+              ))}
+            </div>
             </div>
             
             <style>{`
@@ -1743,8 +1743,8 @@ export function DashboardPage() {
         </Card>
       )}
 
-      {/* Gráficos de Cancelamento e Canceladas */}
-      {(cancelamentoData.length > 0 || canceladasData.length > 0) && (
+{/* Gráficos de Cancelamento e Canceladas */}
+{(cancelamentoData.length > 0 || canceladasData.length > 0) && (
   <div className="grid gap-4 md:grid-cols-2">
     {/* Gráfico de Notas em Cancelamento */}
     <Card>
@@ -1800,9 +1800,9 @@ export function DashboardPage() {
         )}
       </CardContent>
     </Card>
-
-    {/* Gráfico de Notas Canceladas */}
-    <Card>
+          
+          {/* Gráfico de Notas Canceladas */}
+          <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <XCircle className="h-5 w-5 text-red-500" />
@@ -1832,7 +1832,7 @@ export function DashboardPage() {
               )}
             </CardContent>
           </Card>
-      </div>
+        </div>
       )}
 
       {/* Secondary Charts Row */}

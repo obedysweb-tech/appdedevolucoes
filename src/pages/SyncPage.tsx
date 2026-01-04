@@ -324,7 +324,7 @@ export function SyncPage() {
                 const itemTotal = normalizeNumericValue(row['[Item] Valor Total Bruto']) || 0;
                 returnEntry.total_value += itemTotal;
                 
-                    returnEntry.items.push({
+                returnEntry.items.push({
                     description: row['[Item] Descrição'],
                     quantity: normalizeNumericValue(row['[Item] Quantidade']) || 0,
                     unit: row['[Item] Unidade'],

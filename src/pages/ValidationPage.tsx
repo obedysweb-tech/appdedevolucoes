@@ -1089,7 +1089,7 @@ export function ValidationPage() {
           // Verificar se o item atualizado tem o motivo
           const itemAtualizado = todosItens.find((i: any) => String(i.id) === itemIdString);
           console.log(`Tentativa ${tentativas + 1} - Item encontrado:`, itemAtualizado);
-          
+
           if (itemAtualizado && itemAtualizado.motivo_id === motivoId) {
             console.log(`✅ Item confirmado com motivo na tentativa ${tentativas + 1}`);
             break;
@@ -1555,80 +1555,80 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
         )}
         {/* Tabela com layout melhorado */}
         <div className="overflow-x-auto border rounded-lg">
-          <Table>
+        <Table>
             <TableHeader className="bg-muted/50">
-              <TableRow>
-                {isSelectMode && (
+            <TableRow>
+              {isSelectMode && (
                   <TableHead className="w-[50px] sticky left-0 bg-muted/50 z-10">
-                    <button onClick={toggleSelectAll} className="p-1 hover:bg-muted rounded">
-                      {selectedItems.size === data.length && data.length > 0 ? (
-                        <CheckSquare className="h-4 w-4" />
-                      ) : (
-                        <Square className="h-4 w-4" />
-                      )}
-                    </button>
-                  </TableHead>
-                )}
+                  <button onClick={toggleSelectAll} className="p-1 hover:bg-muted rounded">
+                    {selectedItems.size === data.length && data.length > 0 ? (
+                      <CheckSquare className="h-4 w-4" />
+                    ) : (
+                      <Square className="h-4 w-4" />
+                    )}
+                  </button>
+                </TableHead>
+              )}
                 <TableHead className="w-[50px] sticky left-0 bg-muted/50 z-10"></TableHead>
                 <TableHead className="min-w-[100px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('data_emissao')}>
                   <div className="flex items-center gap-1">
-                    Data Emissão
-                    <SortIcon field="data_emissao" />
-                  </div>
-                </TableHead>
+                  Data Emissão
+                  <SortIcon field="data_emissao" />
+                </div>
+              </TableHead>
                 <TableHead className="min-w-[120px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('numero')}>
                   <div className="flex items-center gap-1">
-                    Nota Fiscal
-                    <SortIcon field="numero" />
-                  </div>
-                </TableHead>
+                  Nota Fiscal
+                  <SortIcon field="numero" />
+                </div>
+              </TableHead>
                 <TableHead className="min-w-[200px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('nome_cliente')}>
                   <div className="flex items-center gap-1">
-                    Cliente
-                    <SortIcon field="nome_cliente" />
-                  </div>
-                </TableHead>
+                  Cliente
+                  <SortIcon field="nome_cliente" />
+                </div>
+              </TableHead>
                 <TableHead className="min-w-[150px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('vendedor')}>
                   <div className="flex items-center gap-1">
-                    Vendedor
-                    <SortIcon field="vendedor" />
-                  </div>
-                </TableHead>
+                  Vendedor
+                  <SortIcon field="vendedor" />
+                </div>
+              </TableHead>
                 <TableHead className="min-w-[150px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('motivo')}>
                   <div className="flex items-center gap-1">
-                    Motivo
-                    <SortIcon field="motivo" />
-                  </div>
-                </TableHead>
+                  Motivo
+                  <SortIcon field="motivo" />
+                </div>
+              </TableHead>
                 <TableHead className="min-w-[100px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('valor_total_nota')}>
                   <div className="flex items-center gap-1">
-                    Valor Total
-                    <SortIcon field="valor_total_nota" />
-                  </div>
-                </TableHead>
+                  Valor Total
+                  <SortIcon field="valor_total_nota" />
+                </div>
+              </TableHead>
                 <TableHead className="min-w-[60px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('dias')}>
                   <div className="flex items-center gap-1">
-                    Dias
-                    <SortIcon field="dias" />
-                  </div>
-                </TableHead>
+                  Dias
+                  <SortIcon field="dias" />
+                </div>
+              </TableHead>
                 <TableHead className="min-w-[100px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('prazo')}>
                   <div className="flex items-center gap-1">
-                    Prazo
-                    <SortIcon field="prazo" />
-                  </div>
-                </TableHead>
+                  Prazo
+                  <SortIcon field="prazo" />
+                </div>
+              </TableHead>
                 <TableHead className="min-w-[120px] cursor-pointer hover:bg-muted/50 text-xs font-semibold px-3 py-3" onClick={() => handleSort('resultado')}>
                   <div className="flex items-center gap-1">
-                    Resultado
-                    <SortIcon field="resultado" />
-                  </div>
-                </TableHead>
+                  Resultado
+                  <SortIcon field="resultado" />
+                </div>
+              </TableHead>
                 <TableHead className="min-w-[150px] text-xs font-semibold px-3 py-3">Validado Por</TableHead>
                 <TableHead className="min-w-[200px] text-xs font-semibold px-3 py-3">Comentário</TableHead>
                 <TableHead className="min-w-[120px] text-xs font-semibold px-3 py-3">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
+            </TableRow>
+          </TableHeader>
           <TableBody>
             {data.map((item) => {
               const resultado = (item.resultado || 'PENDENTE VALIDAÇÃO') as ResultadoStatus;
@@ -1760,7 +1760,7 @@ ${item.justificativa ? `*Comentário:*\n${item.justificativa}` : ''}`;
                                             onClick={(e) => e.stopPropagation()}
                                             onMouseDown={(e) => e.stopPropagation()}
                                             className="z-[10000]"
-                                          >
+                                        >
                                             {RESULTADO_CICLO.map((res) => (
                                               <SelectItem 
                                                 key={res} 
