@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { DashboardPage } from "./pages/DashboardPage";
+import { DashboardLancadasPage } from "./pages/DashboardLancadasPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SyncPage } from "./pages/SyncPage";
@@ -97,7 +98,7 @@ function IndexRedirect() {
     return <Navigate to="/empty" replace />;
   }
   
-  // Outros usuários vão para dashboard
+  // Outros usuários vão para dashboard pendências
   return <Navigate to="/dashboard" replace />;
 }
 
@@ -590,6 +591,7 @@ function App() {
         >
           <Route index element={<IndexRedirect />} />
           <Route path="dashboard" element={<RoleProtectedRoute allowedRoles={['GESTOR', 'COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR']}><DashboardPage /></RoleProtectedRoute>} />
+          <Route path="dashboard-lancadas" element={<RoleProtectedRoute allowedRoles={['GESTOR', 'COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR']}><DashboardLancadasPage /></RoleProtectedRoute>} />
           <Route path="validation" element={<RoleProtectedRoute allowedRoles={['COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR']}><ValidationPage /></RoleProtectedRoute>} />
           <Route path="reports" element={<RoleProtectedRoute allowedRoles={['GESTOR', 'COMERCIAL', 'LOGISTICA', 'ADMIN', 'VENDEDOR']}><ReportsPage /></RoleProtectedRoute>} />
           <Route path="sync" element={<RoleProtectedRoute allowedRoles={['LOGISTICA', 'ADMIN']}><SyncPage /></RoleProtectedRoute>} />

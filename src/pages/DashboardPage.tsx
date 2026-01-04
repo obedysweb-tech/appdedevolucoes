@@ -164,13 +164,17 @@ export function DashboardPage() {
     const effectiveStartDate = filters.startDate || periodDates.startDate;
     const effectiveEndDate = filters.endDate || periodDates.endDate;
     
+    // FILTRO FIXO: Apenas notas com resultado PENDENTE VALIDAÇÃO, TRATATIVA DE ANULAÇÃO e VALIDADA
+    query = query.in('resultado', ['PENDENTE VALIDAÇÃO', 'TRATATIVA DE ANULAÇÃO', 'VALIDADA']);
+    
     // Aplicar Filtros
     if (filters.search) {
         query = query.or(`nome_cliente.ilike.%${filters.search}%,vendedor.ilike.%${filters.search}%,numero.ilike.%${filters.search}%`);
     }
-    if (filters.resultado && filters.resultado.length > 0) {
-      query = query.in('resultado', filters.resultado);
-    }
+    // Remover filtro de resultado do usuário, pois já temos filtro fixo acima
+    // if (filters.resultado && filters.resultado.length > 0) {
+    //   query = query.in('resultado', filters.resultado);
+    // }
     if (filters.motivo && filters.motivo.length > 0) {
       query = query.in('motivo_id', filters.motivo);
     }
@@ -1220,8 +1224,8 @@ export function DashboardPage() {
   return (
     <div className="space-y-6">
       <PageHeader 
-        title="Dashboard" 
-        description="Visão geral das devoluções com KPIs, gráficos e insights automáticos para análise estratégica."
+        title="Dashboard Pendências" 
+        description="Visão geral das devoluções pendentes (Pendente Validação, Tratativa de Anulação e Validadas) com KPIs, gráficos e insights automáticos para análise estratégica."
       />
       
       <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">

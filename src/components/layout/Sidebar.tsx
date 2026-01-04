@@ -42,9 +42,15 @@ export function Sidebar({ className, isOpen = false, onClose }: SidebarProps) {
 
   const routes = [
     {
-      label: "Dashboard",
+      label: "Dashboard Pendências",
       icon: LayoutDashboard,
       href: "/dashboard",
+      roles: ["GESTOR", "COMERCIAL", "LOGISTICA", "ADMIN", "VENDEDOR"],
+    },
+    {
+      label: "Dashboard Lançadas",
+      icon: LayoutDashboard,
+      href: "/dashboard-lancadas",
       roles: ["GESTOR", "COMERCIAL", "LOGISTICA", "ADMIN", "VENDEDOR"],
     },
     {

@@ -190,7 +190,11 @@ export function ReportsPage() {
         const cliente = clientesMap.get(r.cnpj_destinatario);
         return {
           ...r,
-          setor_nome: (typeof r.setores === 'object' && r.setores?.nome) ? r.setores.nome : (typeof r.setores === 'string' ? r.setores : '-'),
+          setor_nome: (typeof r.motivos_devolucao === 'object' && r.motivos_devolucao?.setores?.nome) 
+            ? r.motivos_devolucao.setores.nome 
+            : (typeof r.setores === 'object' && r.setores?.nome) 
+            ? r.setores.nome 
+            : (typeof r.setores === 'string' ? r.setores : '-'),
           motivo_nome: (typeof r.motivos_devolucao === 'object' && r.motivos_devolucao?.nome) ? r.motivos_devolucao.nome : (typeof r.motivos_devolucao === 'string' ? r.motivos_devolucao : '-'),
           itens_count: r.itens?.length || 0,
           nome_cliente: cliente?.nome || r.nome_cliente || 'Cliente não encontrado',
@@ -1624,6 +1628,7 @@ export function ReportsPage() {
                                         <SortIcon field="motivo" />
                                     </div>
                                 </TableHead>
+                                <TableHead className="text-[10px] px-2">Setor</TableHead>
                                 <TableHead className="cursor-pointer hover:bg-muted/50 text-[10px] px-2" onClick={() => handleSort('valor_total_nota')}>
                                     <div className="flex items-center">
                                         Valor Total
@@ -1651,7 +1656,7 @@ export function ReportsPage() {
                         <TableBody>
                             {data.map((item) => (
                                 <TableRow key={item.id} className="group">
-                                    <TableCell colSpan={13} className="p-0 border-b">
+                                    <TableCell colSpan={14} className="p-0 border-b">
                                         <Accordion type="single" collapsible className="w-full">
                                             <AccordionItem value={item.id} className="border-b-0">
                                                 <div className="flex items-center w-full py-2 px-4 hover:bg-muted/50">
@@ -1662,6 +1667,7 @@ export function ReportsPage() {
                                                         <div className="w-32 truncate" title={item.nome_cliente}>{item.nome_cliente}</div>
                                                         <div className="w-24 truncate" title={item.vendedor}>{item.vendedor}</div>
                                                         <div className="w-40 truncate" title={item.motivo_nome}>{item.motivo_nome || '-'}</div>
+                                                        <div className="w-32 truncate" title={item.setor_nome}>{item.setor_nome || '-'}</div>
                                                         <div className="w-28 text-right">R$ {Number(item.valor_total_nota || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
                                                         <div className="w-20">
                                                             <span className={`text-[9px] px-1 py-0.5 rounded ${
@@ -1766,7 +1772,7 @@ export function ReportsPage() {
                             ))}
                             {data.length === 0 && (
                                 <TableRow>
-                                    <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
+                                    <TableCell colSpan={14} className="text-center py-8 text-muted-foreground">
                                         Nenhum dado encontrado com os filtros atuais.
                                     </TableCell>
                                 </TableRow>
