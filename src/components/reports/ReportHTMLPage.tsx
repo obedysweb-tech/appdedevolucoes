@@ -19,18 +19,6 @@ interface ReportHTMLPageProps {
   filters: any;
 }
 
-// Calcular produtos devolvidos
-function calculateProdutosDevolvidos(data: any[]): number {
-  let total = 0;
-  data.forEach(devol => {
-    const itens = devol.itens || [];
-    itens.forEach((item: any) => {
-      total += Number(item.quantidade) || 0;
-    });
-  });
-  return total;
-}
-
 export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps): string {
   // Calcular dados dos gráficos
   const topClientesChart = data.reduce((acc: any, curr) => {
@@ -42,7 +30,7 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
   const topClientesList = Object.entries(topClientesChart)
     .map(([name, value]) => ({ name, value }))
     .sort((a: any, b: any) => b.value - a.value)
-    .slice(0, 5);
+    .slice(0, 10);
 
   const topVendedoresChart = data.reduce((acc: any, curr) => {
     const vendedor = curr.vendedor || 'Desconhecido';
@@ -102,29 +90,9 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     .sort((a: any, b: any) => b.quantidade - a.quantidade)
     .slice(0, 10);
 
-  // Clientes com maior recorrência
-  const clientesRecorrencia = data.reduce((acc: any, curr) => {
-    const name = curr.nome_cliente || 'Desconhecido';
-    acc[name] = (acc[name] || 0) + 1;
-    return acc;
-  }, {});
-  const clientesRecorrenciaList = Object.entries(clientesRecorrencia)
-    .map(([name, count]) => ({ name, count }))
-    .sort((a: any, b: any) => b.count - a.count)
-    .slice(0, 5);
-
-  // Calcular novos cards
-  const pendentesValidacao = data.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO').length;
-  const tratativasAnulacao = data.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO').length;
-  const validadasCount = data.filter(d => d.resultado === 'VALIDADA').length;
-  const totalProcessados = tratativasAnulacao + validadasCount;
-  const percentualPendente = totalProcessados > 0 ? ((totalProcessados / pendentesValidacao) * 100).toFixed(1) : '0';
-  
   const totalValue = data.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0);
   const totalReturns = data.length;
   const ticketMedio = totalReturns > 0 ? (totalValue / totalReturns) : 0;
-  
-  const produtosDevolvidos = calculateProdutosDevolvidos(data);
   
   const insightsList: string[] = [];
   
@@ -162,18 +130,29 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     alertas.push('✅ Nenhum alerta crítico identificado');
   }
 
-  // Tendências
   const validadas = data.filter(d => d.resultado === 'VALIDADA');
-  const taxaValidacao = data.length > 0 
-    ? ((validadas.length / data.length) * 100).toFixed(1)
-    : '0';
-  const taxaCancelamento = data.length > 0
-    ? ((stats.nfCancelamento / data.length) * 100).toFixed(1)
-    : '0';
 
   const periodoText = filters.startDate && filters.endDate 
     ? `${format(filters.startDate, 'dd/MM/yyyy', { locale: ptBR })} a ${format(filters.endDate, 'dd/MM/yyyy', { locale: ptBR })}`
     : filters.period || 'Período não especificado';
+
+  // Construir informações de filtros selecionados
+  const filtrosSelecionados: string[] = [];
+  if (filters.motivo && filters.motivo.length > 0) {
+    filtrosSelecionados.push(`Motivos: ${filters.motivo.length} selecionado(s)`);
+  }
+  if (filters.cliente && filters.cliente.length > 0) {
+    filtrosSelecionados.push(`Clientes: ${filters.cliente.length} selecionado(s)`);
+  }
+  if (filters.vendedor && filters.vendedor.length > 0) {
+    filtrosSelecionados.push(`Vendedores: ${filters.vendedor.length} selecionado(s)`);
+  }
+  if (filters.setor && filters.setor.length > 0) {
+    filtrosSelecionados.push(`Setores: ${filters.setor.length} selecionado(s)`);
+  }
+  if (filters.search) {
+    filtrosSelecionados.push(`Busca: "${filters.search}"`);
+  }
 
   // Tabelas de dados
   const pendentes = data.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO');
@@ -197,1104 +176,839 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
     }
   });
 
+  // Gráfico de evolução no tempo
+  const evolucaoMap: Record<string, { value: number, count: number }> = {};
+  data.forEach((curr) => {
+    const date = new Date(curr.data_emissao || curr.created_at);
+    const day = format(date, 'dd/MM', { locale: ptBR });
+    if (!evolucaoMap[day]) {
+      evolucaoMap[day] = { value: 0, count: 0 };
+    }
+    evolucaoMap[day].value += (Number(curr.valor_total_nota) || 0);
+    evolucaoMap[day].count += 1;
+  });
+
+  const evolucaoData = Object.keys(evolucaoMap)
+    .sort((a, b) => {
+      const dateA = new Date(a.split('/').reverse().join('-'));
+      const dateB = new Date(b.split('/').reverse().join('-'));
+      return dateA.getTime() - dateB.getTime();
+    })
+    .map(key => ({
+      name: key,
+      value: evolucaoMap[key].value,
+      count: evolucaoMap[key].count
+    }));
+
   return `
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Relatório de Devoluções - Grupo Doce Mel</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-      color-adjust: exact !important;
-    }
-    
-    /* A4 Portrait: 210mm x 297mm */
-    @page {
-      size: A4 portrait;
-      margin: 15mm;
-    }
-    
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relatório de Devoluções - Grupo Doce Mel</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  
+  @page {
+    size: A4 portrait;
+    margin: 15mm;
+  }
+  
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: white;
+    padding: 10px;
+    color: #333;
+    font-size: 9px;
+  }
+  
+  .page {
+    page-break-after: auto;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .header {
+    background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%);
+    color: white;
+    padding: 12px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+  }
+  
+  .header-logo {
+    width: 50px;
+    height: 50px;
+    background: white;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  
+  .header-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  
+  .header-content {
+    flex: 1;
+  }
+  
+  .header h1 {
+    font-size: 18px;
+    margin-bottom: 4px;
+  }
+  
+  .header-info {
+    font-size: 9px;
+    opacity: 0.95;
+    margin-bottom: 3px;
+  }
+  
+  .header-filters {
+    font-size: 8px;
+    opacity: 0.85;
+    margin-top: 4px;
+  }
+  
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  
+  .kpi-card {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 8px;
+    background: #f9fafb;
+  }
+  
+  .kpi-title {
+    font-size: 7px;
+    color: #666;
+    margin-bottom: 3px;
+  }
+  
+  .kpi-value {
+    font-size: 13px;
+    font-weight: bold;
+    color: #073e29;
+  }
+  
+  .kpi-desc {
+    font-size: 6px;
+    color: #999;
+    margin-top: 2px;
+  }
+  
+  .chart-section {
+    margin-bottom: 10px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  
+  .chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  
+  .chart-title {
+    font-size: 11px;
+    font-weight: bold;
+    margin-bottom: 6px;
+    color: #073e29;
+    border-bottom: 2px solid #073e29;
+    padding-bottom: 3px;
+  }
+
+  .chart-container {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 6px;
+    background: white;
+    height: 140px;
+    position: relative;
+    width: 100%;
+  }
+  
+  .insights-container {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 6px;
+    background: white;
+    height: 140px;
+    position: relative;
+    width: 100%;
+    overflow-y: auto;
+  }
+  
+  .insight-item {
+    font-size: 8px;
+    margin-bottom: 4px;
+    padding-left: 6px;
+    line-height: 1.4;
+    color: #333;
+  }
+  
+  .data-table-section {
+    margin-top: 12px;
+    margin-bottom: 12px;
+  }
+  
+  .data-table-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #073e29;
+    margin-bottom: 8px;
+    border-bottom: 2px solid #073e29;
+    padding-bottom: 4px;
+  }
+  
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 7px;
+    margin-bottom: 15px;
+    page-break-inside: avoid;
+  }
+  
+  .data-table thead {
+    background: #073e29;
+    color: white;
+  }
+  
+  .data-table th {
+    padding: 6px 4px;
+    text-align: left;
+    font-weight: bold;
+    font-size: 7px;
+  }
+  
+  .data-table td {
+    padding: 4px;
+    border: 1px solid #ddd;
+    color: #333;
+  }
+  
+  .data-table tbody tr:nth-child(even) {
+    background: #f9fafb;
+  }
+  
+  .footer {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 2px solid #073e29;
+    text-align: center;
+    font-size: 7px;
+    color: #666;
+  }
+  
+  @media print {
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-      padding: 20px;
-      color: #333;
-      font-size: 11px;
-      line-height: 1.4;
+      padding: 0;
     }
-    
-    .container {
-      max-width: 210mm; /* Largura A4 */
-      margin: 0 auto;
-      background: white;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.15);
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    
     .no-print {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      z-index: 1000;
-      display: flex;
-      gap: 10px;
+      display: none !important;
     }
-    
-    .btn {
-      background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%);
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: bold;
-      cursor: pointer;
-      box-shadow: 0 4px 15px rgba(7,62,41,0.4);
-      transition: all 0.3s ease;
-    }
-    
-    .btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(7,62,41,0.5);
-    }
-    
-    .header {
-      background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%);
-      color: white;
-      padding: 25px 30px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      page-break-after: avoid;
-      position: relative;
-      overflow: hidden;
-    }
-    
-    .header::before {
-      content: '';
-      position: absolute;
-      top: -50%;
-      right: -10%;
-      width: 300px;
-      height: 300px;
-      background: rgba(255,255,255,0.05);
-      border-radius: 50%;
-    }
-    
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-      z-index: 1;
-    }
-    
-    .logo {
-      width: 60px;
-      height: 60px;
-      background: white;
-      border-radius: 12px;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-    }
-    
-    .logo img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-    
-    .header-title h1 {
-      font-size: 24px;
-      margin-bottom: 6px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-    }
-    
-    .header-title p {
-      font-size: 13px;
-      opacity: 0.9;
-      font-weight: 500;
-    }
-    
-    .header-right {
-      text-align: right;
-      font-size: 11px;
-      z-index: 1;
-    }
-    
-    .header-right div {
-      margin-bottom: 6px;
-      background: rgba(255,255,255,0.1);
-      padding: 6px 12px;
-      border-radius: 6px;
-      backdrop-filter: blur(10px);
-    }
-    
-    .content {
-      padding: 25px 30px;
-    }
-    
-    /* Stats Grid - 4 colunas */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      margin-bottom: 20px;
-      page-break-after: avoid;
-    }
-    
-    .stat-card {
-      background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-      border: 2px solid #e9ecef;
-      border-radius: 8px;
-      padding: 10px 12px;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-      transition: all 0.3s ease;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-    }
-    
-    .stat-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      border-color: #073e29;
-    }
-    
-    .stat-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, #073e29 0%, #0a4d33 100%);
-    }
-    
-    .stat-icon {
-      font-size: 20px;
-      margin-bottom: 4px;
-    }
-    
-    .stat-title {
-      font-size: 9px;
-      color: #6c757d;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      margin-bottom: 5px;
-    }
-    
-    .stat-value {
-      font-size: 20px;
-      font-weight: 800;
-      color: #073e29;
-      margin-bottom: 3px;
-      line-height: 1;
-    }
-    
-    .stat-subvalue {
-      font-size: 9px;
-      color: #6c757d;
-      font-weight: 600;
-    }
-    
-    .section-title {
-      font-size: 18px;
-      font-weight: 800;
-      color: #073e29;
-      margin: 25px 0 15px 0;
-      padding-bottom: 10px;
-      border-bottom: 3px solid #073e29;
-      page-break-after: avoid;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    
-    .section-title::before {
-      content: '';
-      width: 5px;
-      height: 24px;
-      background: linear-gradient(180deg, #073e29 0%, #0a4d33 100%);
-      border-radius: 3px;
-    }
-    
-    /* Charts Grid - 2 colunas para A4 */
-    .charts-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 15px;
-      margin-bottom: 25px;
+    .chart-container, .data-table {
       page-break-inside: avoid;
     }
-    
-    .chart-card {
-      background: white;
-      border: 2px solid #e9ecef;
-      border-radius: 10px;
-      padding: 12px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-      page-break-inside: avoid;
-      transition: all 0.3s ease;
-    }
-    
-    .chart-card:hover {
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-      border-color: #073e29;
-    }
-    
-    .chart-title {
-      font-size: 11px;
-      font-weight: 700;
-      color: #073e29;
-      margin-bottom: 10px;
-      text-align: center;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-    }
-    
-    .chart-container {
-      position: relative;
-      height: 180px; /* Altura fixa para consistência */
-    }
-    
-    .insights-box {
-      background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
-      border: 2px solid #073e29;
-      border-radius: 10px;
-      padding: 12px;
-      margin-bottom: 15px;
-      page-break-inside: avoid;
-      box-shadow: 0 2px 6px rgba(7,62,41,0.1);
-    }
-    
-    .insights-title {
-      font-size: 14px;
-      font-weight: 800;
-      color: #073e29;
-      margin-bottom: 10px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    .insights-list {
-      list-style: none;
-    }
-    
-    .insights-list li {
-      padding: 6px 10px;
-      margin-bottom: 5px;
-      border-left: 3px solid #073e29;
-      background: white;
-      border-radius: 5px;
-      font-size: 10px;
-      color: #374151;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }
-    
-    .data-table {
-      width: 100%;
-      border-collapse: separate;
-      border-spacing: 0;
-      margin-bottom: 30px;
-      font-size: 10px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-      border-radius: 10px;
-      overflow: hidden;
-    }
-    
-    .data-table thead {
-      background: linear-gradient(135deg, #073e29 0%, #0a4d33 100%);
-      color: white;
-    }
-    
-    .data-table th {
-      padding: 10px 8px;
-      text-align: left;
-      font-weight: 700;
-      font-size: 9px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    
-    .data-table td {
-      padding: 8px;
-      border-bottom: 1px solid #e9ecef;
-      font-size: 10px;
-    }
-    
-    .data-table tbody tr {
-      page-break-inside: avoid;
-      transition: background-color 0.2s ease;
-    }
-    
-    .data-table tbody tr:hover {
-      background-color: #f8f9fa;
-    }
-    
-    .data-table tbody tr:last-child td {
-      border-bottom: none;
-    }
-    
-    .intelligence-section {
-      background: linear-gradient(135deg, #fff7ed 0%, #fed7aa 100%);
-      border: 2px solid #f97316;
-      border-radius: 10px;
-      padding: 12px;
-      margin-bottom: 15px;
-      page-break-inside: avoid;
-      box-shadow: 0 2px 6px rgba(249,115,22,0.1);
-    }
-    
-    .intelligence-title {
-      font-size: 14px;
-      font-weight: 800;
-      color: #ea580c;
-      margin-bottom: 10px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    .intelligence-subsection {
-      margin-bottom: 10px;
-      background: white;
-      padding: 10px;
-      border-radius: 6px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-    }
-    
-    .intelligence-subsection h4 {
-      font-size: 11px;
-      color: #ea580c;
-      margin-bottom: 6px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    
-    .intelligence-subsection ul {
-      list-style: none;
-      padding-left: 0;
-    }
-    
-    .intelligence-subsection li {
-      padding: 5px 8px;
-      font-size: 10px;
-      color: #374151;
-      border-left: 3px solid #f97316;
-      margin-bottom: 4px;
-      background: #fff7ed;
-      border-radius: 4px;
-    }
-    
-    .page-break {
-      page-break-before: always;
-    }
-    
-    .table-subtitle {
-      color: #073e29;
-      margin: 20px 0 12px 0;
-      font-size: 14px;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    .table-subtitle::before {
-      content: '▶';
-      color: #073e29;
-    }
-    
-    @media print {
-      * {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-        color-adjust: exact !important;
-      }
-      
-      @page {
-        size: A4 portrait;
-        margin: 15mm;
-      }
-      
-      .no-print {
-        display: none !important;
-      }
-      
-      body {
-        padding: 0;
-        background: white !important;
-      }
-      
-      .container {
-        box-shadow: none;
-        border-radius: 0;
-        max-width: 100%;
-      }
-      
-      .chart-container {
-        height: 200px;
-      }
-      
-      .page-break {
-        page-break-before: always;
-      }
-      
-      .chart-card,
-      .stat-card,
-      .insights-box,
-      .intelligence-section {
-        page-break-inside: avoid;
-      }
-    }
-    
-    @media screen and (max-width: 768px) {
-      .stats-grid {
-        grid-template-columns: repeat(2, 1fr);
-      }
-      
-      .charts-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
+  }
+</style>
 </head>
 <body>
-  <div class="no-print">
-    <button class="btn" onclick="window.print()">
-      🖨️ Imprimir / Salvar PDF
-    </button>
-    <button class="btn" onclick="window.close()">
-      ✖️ Fechar
-    </button>
-  </div>
+<button class="no-print" onclick="window.print()" style="position: fixed; top: 10px; right: 10px; z-index: 1000; background: #073e29; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-weight: bold;">
+  🖨️ Imprimir
+</button>
 
-  <div class="container">
-    <!-- Header -->
-    <div class="header">
-      <div class="header-left">
-        <div class="logo">
-          <img src="/logo.png" alt="Logo Doce Mel" onerror="this.onerror=null; this.style.display='none';">
-        </div>
-        <div class="header-title">
-          <h1>Relatório de Devoluções</h1>
-          <p>GRUPO DOCE MEL</p>
-        </div>
-      </div>
-      <div class="header-right">
-        <div><strong>Gerado em:</strong> ${format(new Date(), 'dd/MM/yyyy, HH:mm:ss', { locale: ptBR })}</div>
-        <div><strong>Período:</strong> ${periodoText}</div>
-      </div>
+<div class="page">
+  <div class="header">
+    <div class="header-logo">
+      <img src="/logo.png" alt="Logo" onerror="this.style.display='none'" style="background-color: #073e29;">
     </div>
-
-    <div class="content">
-      <!-- Stats Cards - 4 colunas, 2 linhas -->
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-icon">📋</div>
-          <div class="stat-title">NF Pendentes</div>
-          <div class="stat-value">${stats.nfPendentes}</div>
-          <div class="stat-subvalue">R$ ${stats.totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">❌</div>
-          <div class="stat-title">NF Cancelamento</div>
-          <div class="stat-value">${stats.nfCancelamento}</div>
-          <div class="stat-subvalue">R$ ${stats.totalCancelamento.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">⏰</div>
-          <div class="stat-title">NF em Atraso</div>
-          <div class="stat-value">${stats.nfAtraso}</div>
-          <div class="stat-subvalue">R$ ${stats.totalAtraso.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">✅</div>
-          <div class="stat-title">NF Validadas</div>
-          <div class="stat-value">${stats.nfValidadas}</div>
-          <div class="stat-subvalue">R$ ${stats.totalValidadas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">💰</div>
-          <div class="stat-title">Total Geral</div>
-          <div class="stat-value">${data.length}</div>
-          <div class="stat-subvalue">R$ ${stats.totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">📊</div>
-          <div class="stat-title">% Pendente</div>
-          <div class="stat-value">${percentualPendente}%</div>
-          <div class="stat-subvalue">Pendentes / Processados</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">🎯</div>
-          <div class="stat-title">Ticket Médio</div>
-          <div class="stat-value">R$ ${ticketMedio.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</div>
-          <div class="stat-subvalue">Por devolução</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon">📦</div>
-          <div class="stat-title">Produtos Devolvidos</div>
-          <div class="stat-value">${produtosDevolvidos}</div>
-          <div class="stat-subvalue">Quantidade total</div>
-        </div>
-      </div>
-
-      <!-- Inteligência e Análises -->
-      <div class="intelligence-section">
-        <div class="intelligence-title">🧠 Inteligência e Análises</div>
-        
-        <div class="intelligence-subsection">
-          <h4>👥 Clientes com Maior Recorrência:</h4>
-          <ul>
-            ${clientesRecorrenciaList.map((item: any, index) => `
-              <li><strong>${index + 1}.</strong> ${item.name}: ${item.count} devolução(ões)</li>
-            `).join('')}
-          </ul>
-        </div>
-        
-        <div class="intelligence-subsection">
-          <h4>⚠️ Alertas e Recomendações:</h4>
-          <ul>
-            ${alertas.map(alerta => `<li>${alerta}</li>`).join('')}
-          </ul>
-        </div>
-        
-        <div class="intelligence-subsection">
-          <h4>📈 Tendências:</h4>
-          <ul>
-            <li>Taxa de Validação: <strong>${taxaValidacao}%</strong></li>
-            <li>Taxa de Cancelamento: <strong>${taxaCancelamento}%</strong></li>
-            <li>Total Processado: <strong>${data.length} nota(s) fiscal(is)</strong></li>
-          </ul>
-        </div>
-      </div>
-
-      <!-- Insights -->
-      <div class="insights-box">
-        <div class="insights-title">💡 Insights Automáticos</div>
-        <ul class="insights-list">
-          ${insightsList.map(insight => `<li>${insight}</li>`).join('')}
-        </ul>
-      </div>
-
-      <!-- Gráficos - 2 por linha em formato A4 -->
-      <h2 class="section-title">📊 Análises Gráficas</h2>
-
-      <div class="charts-grid">
-        <div class="chart-card">
-          <div class="chart-title">Top 5 Clientes (Valor)</div>
-          <div class="chart-container">
-            <canvas id="chartClientes"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Top 5 Vendedores (Valor)</div>
-          <div class="chart-container">
-            <canvas id="chartVendedores"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Top 5 Redes (Valor)</div>
-          <div class="chart-container">
-            <canvas id="chartRedes"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Distribuição por Município</div>
-          <div class="chart-container">
-            <canvas id="chartMunicipios"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Principais Motivos</div>
-          <div class="chart-container">
-            <canvas id="chartMotivos"></canvas>
-          </div>
-        </div>
-
-        <div class="chart-card">
-          <div class="chart-title">Produtos Críticos (Top 10)</div>
-          <div class="chart-container">
-            <canvas id="chartProdutos"></canvas>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- PÁGINA 2: Tabelas Detalhadas -->
-    <div class="content page-break">
-      <h2 class="section-title">📋 Dados Detalhados</h2>
-      
-      ${tratativas.length > 0 ? `
-        <h3 class="table-subtitle">Notas em Tratativa de Anulação (${tratativas.length})</h3>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Data Emissão</th>
-              <th>NF</th>
-              <th>Cliente</th>
-              <th>Vendedor</th>
-              <th>Valor</th>
-              <th>Dias</th>
-              <th>Prazo</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tratativas.slice(0, 50).map(item => `
-              <tr>
-                <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
-                <td><strong>${item.numero || '-'}</strong></td>
-                <td>${(item.nome_cliente || '-').substring(0, 30)}</td>
-                <td>${item.vendedor || '-'}</td>
-                <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
-                <td>${item.dias !== null && item.dias !== undefined ? item.dias : '-'}</td>
-                <td>${item.prazo || '-'}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : ''}
-
-      ${pendentes.length > 0 ? `
-        <h3 class="table-subtitle">Notas Pendentes (${pendentes.length})</h3>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Data Emissão</th>
-              <th>NF</th>
-              <th>Cliente</th>
-              <th>Vendedor</th>
-              <th>Valor</th>
-              <th>Dias</th>
-              <th>Prazo</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${pendentes.slice(0, 50).map(item => `
-              <tr>
-                <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
-                <td><strong>${item.numero || '-'}</strong></td>
-                <td>${(item.nome_cliente || '-').substring(0, 30)}</td>
-                <td>${item.vendedor || '-'}</td>
-                <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
-                <td>${item.dias !== null && item.dias !== undefined ? item.dias : '-'}</td>
-                <td>${item.prazo || '-'}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : ''}
-
-      ${validadas.length > 0 ? `
-        <h3 class="table-subtitle">Notas Validadas (${validadas.length})</h3>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Data Emissão</th>
-              <th>NF</th>
-              <th>Cliente</th>
-              <th>Vendedor</th>
-              <th>Motivo</th>
-              <th>Valor</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${validadas.slice(0, 50).map(item => `
-              <tr>
-                <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
-                <td><strong>${item.numero || '-'}</strong></td>
-                <td>${(item.nome_cliente || '-').substring(0, 30)}</td>
-                <td>${item.vendedor || '-'}</td>
-                <td>${item.motivo_nome || '-'}</td>
-                <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : ''}
-
-      ${produtosData.length > 0 ? `
-        <h3 class="table-subtitle">Lista Completa com Produtos (${produtosData.length})</h3>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>NF</th>
-              <th>Vendedor</th>
-              <th>Cliente</th>
-              <th>Produto</th>
-              <th>Unidade</th>
-              <th>Quantidade</th>
-              <th>Valor</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${produtosData.slice(0, 100).map(item => `
-              <tr>
-                <td><strong>${item.nf}</strong></td>
-                <td>${item.vendedor}</td>
-                <td>${item.cliente}</td>
-                <td>${item.produto}</td>
-                <td>${item.unidade}</td>
-                <td>${item.quantidade}</td>
-                <td><strong>${item.valor}</strong></td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : ''}
+    <div class="header-content">
+      <h1>Relatório de Devoluções</h1>
+      <div class="header-info">Relatório Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</div>
+      <div class="header-info">Período: ${periodoText}</div>
+      ${filtrosSelecionados.length > 0 ? `<div class="header-filters">Filtros: ${filtrosSelecionados.join(' | ')}</div>` : ''}
     </div>
   </div>
+  
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-title">NF Pendentes</div>
+      <div class="kpi-value">${stats.nfPendentes}</div>
+      <div class="kpi-desc">R$ ${stats.totalPendente.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">NF Cancelamento</div>
+      <div class="kpi-value">${stats.nfCancelamento}</div>
+      <div class="kpi-desc">R$ ${stats.totalCancelamento.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">NF em Atraso</div>
+      <div class="kpi-value">${stats.nfAtraso}</div>
+      <div class="kpi-desc">R$ ${stats.totalAtraso.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">NF Validadas</div>
+      <div class="kpi-value">${stats.nfValidadas}</div>
+      <div class="kpi-desc">R$ ${stats.totalValidadas.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">Total Geral</div>
+      <div class="kpi-value">${data.length}</div>
+      <div class="kpi-desc">R$ ${stats.totalGeral.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">Ticket Médio</div>
+      <div class="kpi-value">R$ ${ticketMedio.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}</div>
+      <div class="kpi-desc">Por devolução</div>
+    </div>
+  </div>
+  
+  <!-- Seção 1: Evolução no Tempo | Top Clientes -->
+  <div class="chart-grid">
+    <div class="chart-section">
+      <div class="chart-title">Evolução no Tempo</div>
+      <div class="chart-container">
+        <canvas id="chartEvolucao"></canvas>
+      </div>
+    </div>
+    <div class="chart-section">
+      <div class="chart-title">Top Clientes (Valor)</div>
+      <div class="chart-container">
+        <canvas id="chartTopClientes"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Seção 2: Top Vendedores | Top Redes -->
+  <div class="chart-grid">
+    <div class="chart-section">
+      <div class="chart-title">Top Vendedores (Valor)</div>
+      <div class="chart-container">
+        <canvas id="chartVendedores"></canvas>
+      </div>
+    </div>
+    <div class="chart-section">
+      <div class="chart-title">Top Redes (Valor)</div>
+      <div class="chart-container">
+        <canvas id="chartRedes"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Seção 3: Distribuição por Município | Principais Motivos -->
+  <div class="chart-grid">
+    <div class="chart-section">
+      <div class="chart-title">Distribuição por Município</div>
+      <div class="chart-container">
+        <canvas id="chartMunicipios"></canvas>
+      </div>
+    </div>
+    <div class="chart-section">
+      <div class="chart-title">Principais Motivos</div>
+      <div class="chart-container">
+        <canvas id="chartMotivos"></canvas>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Seção 4: Produtos Críticos | Insights Automáticos -->
+  <div class="chart-grid">
+    <div class="chart-section">
+      <div class="chart-title">Produtos Críticos (Top 10)</div>
+      <div class="chart-container">
+        <canvas id="chartProdutos"></canvas>
+      </div>
+    </div>
+    ${insightsList.length > 0 ? `
+    <div class="chart-section">
+      <div class="chart-title">Insights Automáticos</div>
+      <div class="insights-container">
+        ${insightsList.map((insight: string) => `
+          <div class="insight-item">${insight}</div>
+        `).join('')}
+      </div>
+    </div>
+    ` : '<div class="chart-section"></div>'}
+  </div>
+  
+  <!-- Tabelas de Dados -->
+  <div class="data-table-section">
+    ${tratativas.length > 0 ? `
+      <div class="data-table-title">Notas em Tratativa de Anulação (${tratativas.length})</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Data Emissão</th>
+            <th>NF</th>
+            <th>Cliente</th>
+            <th>Vendedor</th>
+            <th>Valor</th>
+            <th>Dias</th>
+            <th>Prazo</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tratativas.slice(0, 50).map(item => `
+            <tr>
+              <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
+              <td><strong>${item.numero || '-'}</strong></td>
+              <td>${(item.nome_cliente || '-').substring(0, 20)}</td>
+              <td>${(item.vendedor || '-').substring(0, 15)}</td>
+              <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
+              <td>${item.dias !== null && item.dias !== undefined ? item.dias : '-'}</td>
+              <td>${item.prazo || '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
 
-  <script>
-    // Configuração padrão dos gráficos
-    Chart.defaults.font.family = "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
-    Chart.defaults.font.size = 10;
-    Chart.defaults.color = '#374151';
+    ${pendentes.length > 0 ? `
+      <div class="data-table-title">Notas Pendentes (${pendentes.length})</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Data Emissão</th>
+            <th>NF</th>
+            <th>Cliente</th>
+            <th>Vendedor</th>
+            <th>Valor</th>
+            <th>Dias</th>
+            <th>Prazo</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pendentes.slice(0, 50).map(item => `
+            <tr>
+              <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
+              <td><strong>${item.numero || '-'}</strong></td>
+              <td>${(item.nome_cliente || '-').substring(0, 20)}</td>
+              <td>${(item.vendedor || '-').substring(0, 15)}</td>
+              <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
+              <td>${item.dias !== null && item.dias !== undefined ? item.dias : '-'}</td>
+              <td>${item.prazo || '-'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
 
-    const chartColors = {
-      primary: '#073e29',
-      secondary: '#0a4d33',
-      accent: '#16a34a',
-      gradient: ['#073e29', '#0a4d33', '#0d5d3f', '#10704b', '#138357']
-    };
+    ${validadas.length > 0 ? `
+      <div class="data-table-title">Notas Validadas (${validadas.length})</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Data Emissão</th>
+            <th>NF</th>
+            <th>Cliente</th>
+            <th>Vendedor</th>
+            <th>Motivo</th>
+            <th>Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${validadas.slice(0, 50).map(item => `
+            <tr>
+              <td>${item.data_emissao ? format(new Date(item.data_emissao), 'dd/MM/yyyy', { locale: ptBR }) : '-'}</td>
+              <td><strong>${item.numero || '-'}</strong></td>
+              <td>${(item.nome_cliente || '-').substring(0, 20)}</td>
+              <td>${(item.vendedor || '-').substring(0, 15)}</td>
+              <td>${(item.motivo_nome || '-').substring(0, 20)}</td>
+              <td><strong>R$ ${(Number(item.valor_total_nota) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
 
-    // Gráfico de Clientes
-    new Chart(document.getElementById('chartClientes'), {
-      type: 'bar',
-      data: {
-        labels: ${JSON.stringify(topClientesList.map((item: any) => item.name.substring(0, 12)))},
-        datasets: [{
-          label: 'Valor (R$)',
-          data: ${JSON.stringify(topClientesList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: chartColors.primary,
-          borderWidth: 2,
-          borderRadius: 6
-        }]
+    ${produtosData.length > 0 ? `
+      <div class="data-table-title">Lista Completa com Produtos (${produtosData.length})</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>NF</th>
+            <th>Vendedor</th>
+            <th>Cliente</th>
+            <th>Produto</th>
+            <th>Unidade</th>
+            <th>Quantidade</th>
+            <th>Valor</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${produtosData.slice(0, 100).map(item => `
+            <tr>
+              <td><strong>${item.nf}</strong></td>
+              <td>${item.vendedor}</td>
+              <td>${item.cliente}</td>
+              <td>${item.produto}</td>
+              <td>${item.unidade}</td>
+              <td>${item.quantidade}</td>
+              <td><strong>${item.valor}</strong></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
+  </div>
+  
+  <div class="footer">
+    <p>Relatório gerado automaticamente pelo Sistema de Devoluções - Grupo Doce Mel</p>
+    <p>Data de geração: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm:ss", { locale: ptBR })}</p>
+  </div>
+</div>
+
+<script>
+  Chart.defaults.font.size = 8;
+  Chart.defaults.color = '#1f2937';
+  Chart.defaults.borderColor = '#e5e7eb';
+  
+  const commonChartOptions = {
+    responsive: false,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        titleColor: '#fff',
+        bodyColor: '#fff',
+        borderColor: '#17432a',
+        borderWidth: 1
+      }
+    },
+    scales: {
+      x: {
+        grid: { color: '#e5e7eb' },
+        ticks: { color: '#1f2937', font: { size: 8 } }
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-              }
-            }
+      y: {
+        grid: { color: '#e5e7eb' },
+        ticks: { color: '#1f2937', font: { size: 8 } }
+      }
+    }
+  };
+  
+  // Gráfico de Evolução no Tempo
+  new Chart(document.getElementById('chartEvolucao'), {
+    type: 'line',
+    data: {
+      labels: ${JSON.stringify(evolucaoData.map((d: any) => d.name))},
+      datasets: [{
+        label: 'Valor Total (R$)',
+        data: ${JSON.stringify(evolucaoData.map((d: any) => d.value))},
+        borderColor: '#17432a',
+        backgroundColor: 'rgba(23, 67, 42, 0.15)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: {
+      ...commonChartOptions,
+      plugins: {
+        ...commonChartOptions.plugins,
+        legend: { display: true, position: 'bottom', labels: { color: '#1f2937' } },
+        tooltip: {
+          ...commonChartOptions.plugins.tooltip,
+          callbacks: {
+            label: (context) => 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+          }
+        }
+      },
+      scales: {
+        ...commonChartOptions.scales,
+        y: {
+          ...commonChartOptions.scales.y,
+          beginAtZero: true,
+          ticks: {
+            ...commonChartOptions.scales.y.ticks,
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })
           }
         },
-        scales: {
-          y: {
-            beginAtZero: true,
-            grid: {
-              color: 'rgba(0, 0, 0, 0.05)'
-            },
-            ticks: {
-              font: { size: 9 },
-              callback: function(value) {
-                return 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-              }
-            }
-          },
-          x: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              font: { size: 9 }
-            }
+        x: {
+          ...commonChartOptions.scales.x,
+          ticks: {
+            ...commonChartOptions.scales.x.ticks,
+            maxRotation: 45,
+            minRotation: 45
           }
         }
       }
-    });
-
-    // Gráfico de Vendedores
-    new Chart(document.getElementById('chartVendedores'), {
-      type: 'bar',
-      data: {
-        labels: ${JSON.stringify(topVendedoresList.map((item: any) => item.name.substring(0, 12)))},
-        datasets: [{
-          label: 'Valor (R$)',
-          data: ${JSON.stringify(topVendedoresList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: chartColors.primary,
-          borderWidth: 2,
-          borderRadius: 6
-        }]
+    }
+  });
+  
+  // Gráfico Top Clientes
+  new Chart(document.getElementById('chartTopClientes'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(topClientesList.map((d: any) => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name))},
+      datasets: [{
+        label: 'Valor (R$)',
+        data: ${JSON.stringify(topClientesList.map((d: any) => d.value))},
+        backgroundColor: '#17432a',
+        borderColor: '#0a4d33',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      ...commonChartOptions,
+      indexAxis: 'y',
+      scales: {
+        ...commonChartOptions.scales,
+        x: {
+          ...commonChartOptions.scales.x,
+          ticks: {
+            ...commonChartOptions.scales.x.ticks,
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })
+          }
+        }
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-              }
-            }
+      plugins: {
+        ...commonChartOptions.plugins,
+        tooltip: {
+          ...commonChartOptions.plugins.tooltip,
+          callbacks: {
+            label: (context) => 'R$ ' + context.parsed.x.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
+          }
+        }
+      }
+    }
+  });
+  
+  // Gráfico Top Vendedores
+  new Chart(document.getElementById('chartVendedores'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(topVendedoresList.map((d: any) => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name))},
+      datasets: [{
+        label: 'Valor (R$)',
+        data: ${JSON.stringify(topVendedoresList.map((d: any) => d.value))},
+        backgroundColor: '#0a4d33',
+        borderColor: '#17432a',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      ...commonChartOptions,
+      scales: {
+        ...commonChartOptions.scales,
+        y: {
+          ...commonChartOptions.scales.y,
+          beginAtZero: true,
+          ticks: {
+            ...commonChartOptions.scales.y.ticks,
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })
           }
         },
-        scales: {
-          y: {
-            beginAtZero: true,
-            grid: {
-              color: 'rgba(0, 0, 0, 0.05)'
-            },
-            ticks: {
-              font: { size: 9 },
-              callback: function(value) {
-                return 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-              }
-            }
-          },
-          x: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              font: { size: 9 }
-            }
+        x: {
+          ...commonChartOptions.scales.x,
+          ticks: {
+            ...commonChartOptions.scales.x.ticks,
+            maxRotation: 45,
+            minRotation: 45
+          }
+        }
+      },
+      plugins: {
+        ...commonChartOptions.plugins,
+        tooltip: {
+          ...commonChartOptions.plugins.tooltip,
+          callbacks: {
+            label: (context) => 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
           }
         }
       }
-    });
-
-    // Gráfico de Redes
-    new Chart(document.getElementById('chartRedes'), {
-      type: 'doughnut',
-      data: {
-        labels: ${JSON.stringify(topRedesList.map((item: any) => item.name))},
-        datasets: [{
-          data: ${JSON.stringify(topRedesList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: 'white',
-          borderWidth: 2
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: {
-              padding: 10,
-              font: {
-                size: 9,
-                weight: 'bold'
-              }
-            }
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return context.label + ': R$ ' + context.parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-              }
-            }
-          }
-        }
-      }
-    });
-
-    // Gráfico de Municípios
-    new Chart(document.getElementById('chartMunicipios'), {
-      type: 'bar',
-      data: {
-        labels: ${JSON.stringify(municipioList.map((item: any) => item.name.substring(0, 12)))},
-        datasets: [{
-          label: 'Valor (R$)',
-          data: ${JSON.stringify(municipioList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: chartColors.primary,
-          borderWidth: 2,
-          borderRadius: 6
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return 'R$ ' + context.parsed.x.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-              }
-            }
+    }
+  });
+  
+  // Gráfico Top Redes
+  new Chart(document.getElementById('chartRedes'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(topRedesList.map((d: any) => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name))},
+      datasets: [{
+        label: 'Valor (R$)',
+        data: ${JSON.stringify(topRedesList.map((d: any) => d.value))},
+        backgroundColor: '#065f46',
+        borderColor: '#0a4d33',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      ...commonChartOptions,
+      scales: {
+        ...commonChartOptions.scales,
+        y: {
+          ...commonChartOptions.scales.y,
+          beginAtZero: true,
+          ticks: {
+            ...commonChartOptions.scales.y.ticks,
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })
           }
         },
-        scales: {
-          x: {
-            beginAtZero: true,
-            grid: {
-              color: 'rgba(0, 0, 0, 0.05)'
-            },
-            ticks: {
-              font: { size: 9 },
-              callback: function(value) {
-                return 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 });
-              }
-            }
-          },
-          y: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              font: { size: 9 }
-            }
+        x: {
+          ...commonChartOptions.scales.x,
+          ticks: {
+            ...commonChartOptions.scales.x.ticks,
+            maxRotation: 45,
+            minRotation: 45
+          }
+        }
+      },
+      plugins: {
+        ...commonChartOptions.plugins,
+        tooltip: {
+          ...commonChartOptions.plugins.tooltip,
+          callbacks: {
+            label: (context) => 'R$ ' + context.parsed.y.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
           }
         }
       }
-    });
-
-    // Gráfico de Motivos
-    new Chart(document.getElementById('chartMotivos'), {
-      type: 'pie',
-      data: {
-        labels: ${JSON.stringify(motivosList.map((item: any) => item.name))},
-        datasets: [{
-          data: ${JSON.stringify(motivosList.map((item: any) => item.value))},
-          backgroundColor: chartColors.gradient,
-          borderColor: 'white',
-          borderWidth: 2
-        }]
+    }
+  });
+  
+  // Gráfico Municípios
+  new Chart(document.getElementById('chartMunicipios'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(municipioList.map((d: any) => d.name.length > 12 ? d.name.substring(0, 12) + '...' : d.name))},
+      datasets: [{
+        label: 'Valor (R$)',
+        data: ${JSON.stringify(municipioList.map((d: any) => d.value))},
+        backgroundColor: '#17432a',
+        borderColor: '#0a4d33',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      ...commonChartOptions,
+      indexAxis: 'y',
+      scales: {
+        ...commonChartOptions.scales,
+        x: {
+          ...commonChartOptions.scales.x,
+          ticks: {
+            ...commonChartOptions.scales.x.ticks,
+            callback: (value) => 'R$ ' + value.toLocaleString('pt-BR', { maximumFractionDigits: 0 })
+          }
+        }
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: {
-              padding: 10,
-              font: {
-                size: 9,
-                weight: 'bold'
-              }
-            }
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return context.label + ': ' + context.parsed + ' ocorrências';
-              }
-            }
+      plugins: {
+        ...commonChartOptions.plugins,
+        tooltip: {
+          ...commonChartOptions.plugins.tooltip,
+          callbacks: {
+            label: (context) => 'R$ ' + context.parsed.x.toLocaleString('pt-BR', { minimumFractionDigits: 2 })
           }
         }
       }
-    });
-
-    // Gráfico de Produtos
-    new Chart(document.getElementById('chartProdutos'), {
-      type: 'bar',
-      data: {
-        labels: ${JSON.stringify(topProdutosList.slice(0, 10).map((item: any) => item.name.substring(0, 12)))},
-        datasets: [{
-          label: 'Quantidade',
-          data: ${JSON.stringify(topProdutosList.slice(0, 10).map((item: any) => item.quantidade))},
-          backgroundColor: chartColors.gradient,
-          borderColor: chartColors.primary,
-          borderWidth: 2,
-          borderRadius: 6
-        }]
-      },
-      options: {
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: 'rgba(7, 62, 41, 0.9)',
-            padding: 10,
-            titleFont: { size: 12, weight: 'bold' },
-            bodyFont: { size: 11 },
-            callbacks: {
-              label: function(context) {
-                return context.parsed.x.toFixed(2) + ' unidades';
-              }
-            }
+    }
+  });
+  
+  // Gráfico Motivos
+  new Chart(document.getElementById('chartMotivos'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(motivosList.map((d: any) => d.name.length > 15 ? d.name.substring(0, 15) + '...' : d.name))},
+      datasets: [{
+        label: 'Quantidade',
+        data: ${JSON.stringify(motivosList.map((d: any) => d.value))},
+        backgroundColor: '#0a4d33',
+        borderColor: '#17432a',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      ...commonChartOptions,
+      scales: {
+        ...commonChartOptions.scales,
+        y: {
+          ...commonChartOptions.scales.y,
+          beginAtZero: true,
+          ticks: {
+            ...commonChartOptions.scales.y.ticks,
+            stepSize: 1
           }
         },
-        scales: {
-          x: {
-            beginAtZero: true,
-            grid: {
-              color: 'rgba(0, 0, 0, 0.05)'
-            },
-            ticks: {
-              font: { size: 9 },
-              callback: function(value) {
-                return value.toFixed(0);
-              }
-            }
-          },
-          y: {
-            grid: {
-              display: false
-            },
-            ticks: {
-              font: { size: 9 }
-            }
+        x: {
+          ...commonChartOptions.scales.x,
+          ticks: {
+            ...commonChartOptions.scales.x.ticks,
+            maxRotation: 45,
+            minRotation: 45
+          }
+        }
+      },
+      plugins: {
+        ...commonChartOptions.plugins,
+        tooltip: {
+          ...commonChartOptions.plugins.tooltip,
+          callbacks: {
+            label: (context) => context.parsed.y + ' ocorrência(s)'
           }
         }
       }
-    });
-  </script>
+    }
+  });
+  
+  // Gráfico Produtos
+  new Chart(document.getElementById('chartProdutos'), {
+    type: 'bar',
+    data: {
+      labels: ${JSON.stringify(topProdutosList.slice(0, 10).map((d: any) => d.name.length > 15 ? d.name.substring(0, 15) + '...' : d.name))},
+      datasets: [{
+        label: 'Quantidade',
+        data: ${JSON.stringify(topProdutosList.slice(0, 10).map((d: any) => d.quantidade))},
+        backgroundColor: '#065f46',
+        borderColor: '#0a4d33',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      ...commonChartOptions,
+      indexAxis: 'y',
+      scales: {
+        ...commonChartOptions.scales,
+        x: {
+          ...commonChartOptions.scales.x,
+          beginAtZero: true
+        }
+      },
+      plugins: {
+        ...commonChartOptions.plugins,
+        tooltip: {
+          ...commonChartOptions.plugins.tooltip,
+          callbacks: {
+            label: (context) => context.parsed.x.toFixed(2) + ' unidades'
+          }
+        }
+      }
+    }
+  });
+</script>
 </body>
 </html>
   `;
