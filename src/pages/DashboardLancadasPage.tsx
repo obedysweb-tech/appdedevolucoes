@@ -974,6 +974,22 @@ const handlePrintDashboard = () => {
   const periodoText = filters.startDate && filters.endDate 
     ? `${format(filters.startDate, 'dd/MM/yyyy', { locale: ptBR })} a ${format(filters.endDate, 'dd/MM/yyyy', { locale: ptBR })}`
     : filters.period || 'Todos os períodos';
+  
+  // Determinar mês do filtro
+  let mesSelecionado = 'Todos os períodos';
+  if (filters.startDate) {
+    mesSelecionado = format(filters.startDate, "MMMM 'de' yyyy", { locale: ptBR });
+  } else if (filters.period) {
+    const periodDates = getDateRangeFromPeriod(filters.period);
+    if (periodDates.startDate) {
+      mesSelecionado = format(periodDates.startDate, "MMMM 'de' yyyy", { locale: ptBR });
+    }
+  }
+  
+  // Determinar título do relatório baseado no tipo de usuário
+  const isVendedor = user?.role === 'VENDEDOR';
+  const nomeVendedor = isVendedor && user?.vendedor ? user.vendedor : 'Geral';
+  const tituloRelatorio = `Dashboard Devoluções Lançadas - ${mesSelecionado} - ${nomeVendedor}`;
 
   // Construir informações de filtros selecionados
   const filtrosSelecionados: string[] = [];
@@ -999,7 +1015,7 @@ const handlePrintDashboard = () => {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dashboard Lançadas - Relatório</title>
+<title>${tituloRelatorio}</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   * {
@@ -1334,7 +1350,7 @@ const handlePrintDashboard = () => {
       <img src="/logo.png" alt="Logo" onerror="this.style.display='none'" style="background-color: #073e29;">
     </div>
     <div class="header-content">
-      <h1>Dashboard Lançadas</h1>
+      <h1>${tituloRelatorio}</h1>
       <div class="header-info">Relatório Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</div>
       <div class="header-info">Período: ${periodoText}</div>
       ${filtrosSelecionados.length > 0 ? `<div class="header-filters">Filtros: ${filtrosSelecionados.join(' | ')}</div>` : ''}
@@ -2177,14 +2193,14 @@ const handlePrintDashboard = () => {
       
       <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
         <FilterBar />
-        <div className="flex gap-2 w-full md:w-auto">
-          <Button variant="outline" size="sm" onClick={fetchDashboardData} className="w-full md:w-auto shrink-0">
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Atualizar
-          </Button>
+        <div className="flex flex-col gap-2 w-full md:w-auto">
           <Button variant="outline" size="sm" onClick={handlePrintDashboard} className="w-full md:w-auto shrink-0">
               <Printer className="mr-2 h-4 w-4" />
               Imprimir Dashboard
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchDashboardData} className="w-full md:w-auto shrink-0">
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Atualizar
           </Button>
         </div>
       </div>

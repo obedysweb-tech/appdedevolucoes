@@ -17,9 +17,20 @@ interface ReportHTMLPageProps {
     totalGeral: number;
   };
   filters: any;
+  user?: {
+    role?: string;
+    vendedor?: string;
+    name?: string;
+  };
 }
 
-export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps): string {
+export function generateReportHTML({ data, stats, filters, user }: ReportHTMLPageProps): string {
+  // Determinar título do relatório baseado no tipo de usuário
+  const dataAtual = format(new Date(), "dd/MM/yyyy", { locale: ptBR });
+  const isVendedor = user?.role === 'VENDEDOR';
+  const nomeVendedor = isVendedor && user?.vendedor ? user.vendedor : 'Geral';
+  const tituloRelatorio = `Relatório das Devoluções - ${dataAtual} - ${nomeVendedor}`;
+
   // Calcular dados dos gráficos
   const topClientesChart = data.reduce((acc: any, curr) => {
     const name = curr.nome_cliente || 'Desconhecido';
@@ -157,6 +168,13 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
   const pendentes = data.filter(d => d.resultado === 'PENDENTE VALIDAÇÃO');
   const tratativas = data.filter(d => d.resultado === 'TRATATIVA DE ANULAÇÃO');
   const validadasParaTabela = data.filter(d => d.resultado === 'VALIDADA');
+  
+  // Dados para tabela "Informações da nota fiscal" (PENDENTE VALIDAÇÃO, VALIDADA, TRATATIVA DE ANULAÇÃO)
+  const notasParaInformacoes = data.filter(d => 
+    d.resultado === 'PENDENTE VALIDAÇÃO' || 
+    d.resultado === 'VALIDADA' || 
+    d.resultado === 'TRATATIVA DE ANULAÇÃO'
+  );
 
   // Lista completa com produtos (apenas PENDENTE VALIDAÇÃO)
   const produtosData: any[] = [];
@@ -206,7 +224,7 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Relatório de Devoluções - Grupo Doce Mel</title>
+<title>${tituloRelatorio}</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   * {
@@ -446,7 +464,7 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
       <img src="/logo.png" alt="Logo" onerror="this.style.display='none'" style="background-color: #073e29;">
     </div>
     <div class="header-content">
-      <h1>Relatório de Devoluções</h1>
+      <h1>${tituloRelatorio}</h1>
       <div class="header-info">Relatório Gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</div>
       <div class="header-info">Período: ${periodoText}</div>
       ${filtrosSelecionados.length > 0 ? `<div class="header-filters">Filtros: ${filtrosSelecionados.join(' | ')}</div>` : ''}
@@ -732,6 +750,39 @@ export function generateReportHTML({ data, stats, filters }: ReportHTMLPageProps
               <td>${item.prazo || '-'}</td>
             </tr>
           `).join('')}
+        </tbody>
+      </table>
+    ` : ''}
+
+    <!-- Tabela: Informações da nota fiscal -->
+    ${notasParaInformacoes.length > 0 ? `
+      <div class="data-table-title">Informações da nota fiscal (${notasParaInformacoes.length})</div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>NF</th>
+            <th>Cliente</th>
+            <th>Dados adicionais</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${notasParaInformacoes.map(item => {
+            // Processar dados_adicionais: cortar tudo a partir de "Representante" (inclusive)
+            let dadosAdicionais = item.dados_adicionais || '-';
+            if (dadosAdicionais !== '-') {
+              const indexRepresentante = dadosAdicionais.indexOf('Representante');
+              if (indexRepresentante !== -1) {
+                dadosAdicionais = dadosAdicionais.substring(0, indexRepresentante).trim();
+              }
+            }
+            return `
+            <tr>
+              <td><strong>${item.numero || '-'}</strong></td>
+              <td>${(item.nome_cliente || '-').substring(0, 30)}</td>
+              <td>${dadosAdicionais}</td>
+            </tr>
+          `;
+          }).join('')}
         </tbody>
       </table>
     ` : ''}

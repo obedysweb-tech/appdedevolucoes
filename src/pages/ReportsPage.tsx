@@ -410,27 +410,40 @@ export function ReportsPage() {
     if (!deletingItem || !user) return;
 
     try {
-      // Deletar itens primeiro
+      // Limpar motivos dos itens primeiro
       const { error: itemsError } = await supabase
         .from('itens_devolucao')
-        .delete()
+        .update({ motivo_id: null })
         .eq('devolucao_id', deletingItem);
 
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        console.error('Erro ao limpar motivos dos itens:', itemsError);
+        // Continuar mesmo se houver erro, pois pode não ter itens
+      }
 
-      // Deletar registro principal
-      const { error: deleteError } = await supabase
+      // Ao invés de deletar, voltar o resultado para PENDENTE VALIDAÇÃO
+      // e limpar campos de validação, finalização, motivos e setor
+      const { error: updateError } = await supabase
         .from('devolucoes')
-        .delete()
+        .update({
+          resultado: 'PENDENTE VALIDAÇÃO',
+          nome_validador: null,
+          finalizada_por: null,
+          data_validacao: null,
+          data_finalizacao: null,
+          prazo: null,
+          motivo_id: null,
+          setor_id: null
+        })
         .eq('id', deletingItem);
 
-      if (deleteError) throw deleteError;
+      if (updateError) throw updateError;
 
-      toast.success('Registro excluído com sucesso!');
+      toast.success('Nota fiscal retornada para validação com sucesso!');
       setDeletingItem(null);
       fetchReportData(); // Recarregar dados
     } catch (error: any) {
-      toast.error("Erro ao excluir registro: " + error.message);
+      toast.error("Erro ao retornar nota para validação: " + error.message);
     }
   };
 
@@ -695,7 +708,8 @@ export function ReportsPage() {
                   totalLancadas: allData.filter(d => d.resultado === 'LANÇADA').reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0),
                   totalGeral: allData.reduce((sum, d) => sum + (Number(d.valor_total_nota) || 0), 0)
                 },
-                filters
+                filters,
+                user: user ? { role: user.role || undefined, vendedor: user.vendedor || undefined, name: user.name || undefined } : undefined
               });
               
               const newWindow = window.open('', '_blank');
@@ -1080,14 +1094,14 @@ export function ReportsPage() {
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-destructive flex items-center gap-2">
               <Trash2 className="h-5 w-5" />
-              Confirmar Exclusão
+              Retornar para Validação
             </DialogTitle>
             <DialogDescription className="pt-2">
-              Tem certeza que deseja excluir este registro?
+              Tem certeza que deseja retornar esta nota fiscal para validação?
             </DialogDescription>
-            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 mt-4">
-              <p className="text-sm text-destructive font-medium">
-                ⚠️ Esta ação não pode ser desfeita.
+            <div className="bg-warning/10 border border-warning/20 rounded-lg p-4 mt-4">
+              <p className="text-sm text-warning font-medium">
+                ⚠️ A nota fiscal voltará para a tela de validação com status "PENDENTE VALIDAÇÃO" e os campos de validação serão limpos.
               </p>
             </div>
           </DialogHeader>
@@ -1104,7 +1118,7 @@ export function ReportsPage() {
               onClick={handleDelete}
               className="flex-1 sm:flex-initial"
             >
-              Sim, Excluir
+              Sim, Retornar para Validação
             </Button>
           </DialogFooter>
         </DialogContent>

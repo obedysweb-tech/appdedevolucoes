@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { User, Mail, Shield, BarChart3, History, TrendingUp, Package, ChevronLeft, ChevronRight } from "lucide-react";
+import { User, Mail, Shield, BarChart3, History, TrendingUp, Package, ChevronLeft, ChevronRight, Send } from "lucide-react";
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
@@ -684,6 +684,59 @@ export function ProfilePage() {
     }
   };
 
+  const handleSendValidationEmail = async () => {
+    if (!user || user.role !== 'VENDEDOR') {
+      toast.error('Apenas vendedores podem enviar validação por email');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Obter token de sessão atualizado
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session) {
+        throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
+      }
+
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+
+      // Chamar Edge Function usando fetch diretamente para garantir que o token seja passado
+      // Usar email do próprio usuário para evitar erro 403 do Resend (domínio de teste)
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const response = await fetch(`${supabaseUrl}/functions/v1/send-validation-email`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || ''
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          email: user.email, // Usar email do próprio usuário para evitar erro 403
+          vendedorNome: user.vendedor || user.name,
+          data: hoje.toISOString()
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido' }));
+        throw new Error(errorData.error || errorData.message || `Erro HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      console.log('Resposta da função:', data);
+      toast.success('Email de validação enviado com sucesso!');
+    } catch (error: any) {
+      console.error('Erro ao enviar email:', error);
+      const errorMessage = error.message || error.error || 'Erro desconhecido';
+      toast.error('Erro ao enviar email: ' + errorMessage);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!user) return null;
 
   // Se usuário não tem role ou é tipo NOVO, mostrar apenas o header
@@ -1181,6 +1234,28 @@ export function ProfilePage() {
                                 </form>
                             </CardContent>
                         </Card>
+
+                        {/* Botão de Enviar Validação por Email (apenas para VENDEDOR) */}
+                        {user.role === 'VENDEDOR' && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Enviar Validação do Dia por E-mail</CardTitle>
+                                    <CardDescription>
+                                        Envie um resumo da validação do dia atual por email com todas as informações importantes.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <Button 
+                                        onClick={handleSendValidationEmail}
+                                        disabled={loading}
+                                        className="w-full md:w-auto"
+                                    >
+                                        <Send className="mr-2 h-4 w-4" />
+                                        {loading ? "Enviando..." : "Enviar validação do dia por e-mail"}
+                                    </Button>
+                                </CardContent>
+                            </Card>
+                        )}
                     </TabsContent>
                 </Tabs>
             </CardContent>
