@@ -110,8 +110,8 @@ export function Sidebar({ className, isOpen = false, onClose }: SidebarProps) {
             />
 
           </div>
-          <h2 className="text-xl font-bold tracking-tight text-primary font-serif">TRIELO CD BA</h2>
-          <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-1">Gestão de Devoluções</p>
+          <h2 className="text-xl font-bold tracking-tight text-[#004100] font-serif">TRIELO CD BA</h2>
+          <p className="text-[10px] text-[#004100] font-bold uppercase tracking-widest mt-1">Gestão de Devoluções</p>
         </div>
         
         {/* Menu Items - apenas se não for usuário NOVO */}
@@ -125,11 +125,11 @@ export function Sidebar({ className, isOpen = false, onClose }: SidebarProps) {
                   className={cn(
                     "w-full justify-start transition-all duration-200 mb-1",
                     location.pathname === route.href 
-                        ? "bg-primary/10 text-primary font-bold border-r-4 border-primary rounded-r-none dark:text-primary dark:bg-primary/20" 
+                        ? "bg-[#004100]/10 text-[#004100] font-bold border-r-4 border-[#004100] rounded-r-none dark:text-[#004100] dark:bg-[#004100]/20" 
                         : "hover:bg-muted text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <route.icon className={cn("mr-3 h-4 w-4", location.pathname === route.href ? "text-primary" : "text-muted-foreground")} />
+                  <route.icon className={cn("mr-3 h-4 w-4", location.pathname === route.href ? "text-[#004100]" : "text-muted-foreground")} />
                   {route.label}
                 </Button>
               </Link>
